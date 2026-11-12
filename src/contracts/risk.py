@@ -2,6 +2,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
 
+from src.contracts.detection import BoundingBox
+
 class DataQuality(str, Enum):
     VALID = "VALID"
     DEGRADED = "DEGRADED"
@@ -36,6 +38,12 @@ class RiskAssessment:
     reason: str
     source_timestamp: float
     expires_at: float
+    # --- Bản cải tiến: các trường tuỳ chọn (mặc định giữ tương thích consumer cũ) ---
+    distance_m: Optional[float] = None         # khoảng cách ước lượng (mét); KHÔNG đọc ra loa
+    ttc_sec: Optional[float] = None            # thời gian đến va chạm ước lượng (giây)
+    closing_speed_mps: Optional[float] = None  # tốc độ tiến lại gần (m/s, dương = đang lại gần)
+    hazard_type: str = "object"                # object | generic | drop_off | low_obstacle
+    region: Optional[BoundingBox] = None       # vùng ảnh của nguy cơ không có bbox YOLO
 
     def is_expired(self, current_mono: float) -> bool:
         return current_mono > self.expires_at

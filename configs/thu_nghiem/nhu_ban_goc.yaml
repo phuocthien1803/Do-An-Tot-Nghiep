@@ -1,0 +1,54 @@
+# Lớp phủ "NHƯ BẢN GỐC": tắt toàn bộ cải tiến để tái tạo hành vi bản gốc (b020e38) ngay trong mã
+# của bản cải tiến, trên cùng máy, cùng camera -> so sánh A/B công bằng.
+#   python app.py --overlay configs/thu_nghiem/nhu_ban_goc.yaml
+#   python scripts/danh_gia_su_kien.py ... --overlay configs/thu_nghiem/nhu_ban_goc.yaml
+# Còn khác bản gốc ở những điểm không ảnh hưởng quyết định cảnh báo: worker lấy frame mới nhất,
+# dọn bộ nhớ chống lặp câu, nhãn HUD "CHUA XAC DINH", phím H/I/V và phản hồi phím bị từ chối.
+mo_ta: "Tắt mọi cải tiến - hành vi cảnh báo như bản gốc"
+
+app_config:
+  runtime:
+    startup_grace_max_sec: null
+    min_frame_brightness: 0
+  audio:
+    earcons: false
+  safety:
+    on_demand_high_alert: "off"
+    beeper: false
+  asr:
+    enabled: false
+  ui:
+    auto_return_warning_sec: 0
+    headless_keyboard: false
+
+model_config:
+  detection:
+    enabled_classes: ["person", "cat", "dog", "chair", "couch", "bed", "dining table", "tv",
+                      "laptop", "keyboard", "mouse", "cell phone", "bottle", "cup", "bowl", "book",
+                      "clock", "vase", "microwave", "oven", "toaster", "sink", "refrigerator", "toilet"]
+    alert_classes: ["person", "dog", "cat", "chair", "couch", "bed", "dining table", "refrigerator",
+                    "toilet", "sink", "laptop", "tv", "cell phone"]
+  tracking:
+    type: "iou"
+    iou_threshold: 0.3
+  depth:
+    auto_scale:
+      enabled: false
+  ocr:
+    filter_garbage: false
+  vqa:
+    answer_style: "goc"
+    guardrail:
+      mode: "regex"
+
+fusion_rules:
+  risk_fsm:
+    risk_model: "distance"
+  hazard_confirmation:
+    required: 1
+    window: 1
+  floor_hazards:
+    enabled: false
+  alert_aggregator:
+    message_style: "day_du"
+    bypass_interval: false

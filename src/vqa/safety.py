@@ -1,9 +1,24 @@
 import re
+import unicodedata
 from typing import Optional
 
 
+def strip_diacritics(text: str) -> str:
+    """Bỏ dấu tiếng Việt (đ -> d) để so khớp câu gõ không dấu."""
+    text = unicodedata.normalize("NFD", text.replace("đ", "d").replace("Đ", "D"))
+    return "".join(ch for ch in text if unicodedata.category(ch) != "Mn")
+
+
 class SafetyGuardrail:
-    """Guardrail độc lập, luôn chạy trước backend model."""
+    """Guardrail độc lập, luôn chạy trước backend model.
+
+    mode="regex": đúng luật của bản gốc.
+    mode="mo_rong" (bản cải tiến): thêm (1) câu hỏi "lối đi có trống/thông thoáng không",
+    (2) câu hỏi có vật cản/chắn/vướng/đụng trên đường, (3) câu xác nhận "cứ đi ... là được đúng
+    không", (4) tiếng Anh dạng "is the path clear / anything in my way", (5) câu gõ KHÔNG DẤU
+    (chỉ áp dụng khi cả câu không có dấu, tránh chặn nhầm câu có dấu), và ở phía câu trả lời
+    không chặn nhầm chủ đề "an toàn thực phẩm/giao thông...". Bản gốc lọt 8/30 câu cần chặn.
+    """
 
     REFUSAL = (
         "Hệ thống không thể xác nhận đường đi có an toàn hay không. "
@@ -38,8 +53,80 @@ class SafetyGuardrail:
         r"\b(?:safe to|is it safe|can i (?:walk|cross|go|move|proceed)|"
         r"(?:any|is there an?) (?:obstacle|hazard|danger))")
 
+    # --- Luật mở rộng (mode="mo_rong") ---
+    _PATH = r"(?:đường|lối|lối đi|đường đi|phía trước|trước mặt|hành lang|lối ra|dưới chân)"
+    _CLEAR = r"(?:trống|thông|thoáng|thông thoáng|vắng|đi được|qua được|có gì không|có vật gì)"
+    _QTAIL = r"(?:không|chứ|chưa|à|hả|phải không|đúng không)"
+    PATH_CLEAR = re.compile(rf"\b{_PATH}\b[^?.]*\b{_CLEAR}\b(?:[^?.]*\b{_QTAIL}\b)?")
+    OBSTRUCT = re.compile(
+        r"\b(?:cản|chắn|vướng|đụng|vấp|tông|húc|đâm|va)\b[^?.]*\b(?:không|chưa|chứ)\b"
+        r"|\b(?:có gì|có vật gì|có ai|có cái gì)\b[^?.]*\b(?:cản|chắn|vướng|đụng|đâm|va)\b")
+    MOVE_CONFIRM = re.compile(
+        r"\b(?:đi|bước|qua|băng qua|tiến|tiếp tục|đi tiếp|xuống|lên)\b[^?.]*"
+        r"\b(?:là được|được|ổn|có sao)\b[^?.]*\b(?:không|chứ|chưa|đúng không|phải không)\b")
+    FLOOR_HAZARD = re.compile(
+        r"\bcó\b[^?.]*\b(?:dốc|mép|vũng nước|trơn|bậc|hố|ổ gà|cầu thang)\b[^?.]*\b(?:không|chưa)\b"
+        r"|\b(?:sàn|nền|mặt đường)\b[^?.]*\btrơn\b")
+    APPROACH = re.compile(r"\b(?:ai|xe|người|con gì)\b[^?.]*\b(?:về phía|lại gần|tới gần|đến gần)\b[^?.]*\b(?:tôi|mình)\b")
+    ENGLISH_EXT = re.compile(
+        r"\b(?:(?:path|way|road)(?: ahead)? (?:is |looks )?clear|is the (?:path|way|road)(?: ahead)? clear|"
+        r"in my way|bump into|run into|keep (?:walking|going)|can i (?:keep|continue))\b")
+
+    def __init__(self, mode: str = "regex"):
+        if mode not in ("regex", "mo_rong"):
+            raise ValueError("mode phải là 'regex' hoặc 'mo_rong'")
+        self.mode = mode
+        self._plain = {}
+        if mode == "mo_rong":
+            names = ("MOVE", "MOVE_PERMISSION", "WH_QUESTION", "FIRST_PERSON", "THIRD_PERSON", "HAZARD",
+                     "HAZARD_PRESENCE", "SAFETY_TOPIC", "READING", "PATH_CLEAR", "OBSTRUCT",
+                     "MOVE_CONFIRM", "FLOOR_HAZARD", "APPROACH")
+            self._plain = {n: re.compile(strip_diacritics(getattr(self, n).pattern)) for n in names}
+
+    def _rules(self, plain: bool):
+        if plain:
+            return lambda name: self._plain[name]
+        return lambda name: getattr(self, name)
+
+    def _extended_refusal(self, text: str, plain: bool) -> bool:
+        r = self._rules(plain)
+        reading = bool(r("READING").search(text))
+        first_person = bool(r("FIRST_PERSON").search(text))
+        wh = bool(r("WH_QUESTION").search(text))
+        third = bool(r("THIRD_PERSON").search(text))
+        if plain:  # áp dụng lại toàn bộ luật gốc cho câu không dấu
+            if r("MOVE").search(text) and first_person:
+                return True
+            if r("MOVE_PERMISSION").search(text) and not (reading or wh or third):
+                return True
+            hazard = r("HAZARD").search(text) or r("HAZARD_PRESENCE").search(text)
+            if hazard and (first_person or not (reading or r("SAFETY_TOPIC").search(text))):
+                return True
+        if reading:
+            return False
+        if r("PATH_CLEAR").search(text) or r("OBSTRUCT").search(text):
+            return True
+        if r("FLOOR_HAZARD").search(text) or r("APPROACH").search(text):
+            return True
+        if r("MOVE_CONFIRM").search(text) and not wh and (first_person or not third):
+            return True
+        return False
+
     def check(self, question: str) -> Optional[str]:
-        normalized = " ".join(question.strip().lower().split())
+        normalized = " ".join(unicodedata.normalize("NFC", question).strip().lower().split())
+        refusal = self._check_original(normalized)
+        if refusal is not None or self.mode != "mo_rong":
+            return refusal
+        if self.ENGLISH_EXT.search(normalized):
+            return self.REFUSAL
+        plain = strip_diacritics(normalized) == normalized
+        if self._extended_refusal(normalized, plain=False):
+            return self.REFUSAL
+        if plain and self._extended_refusal(normalized, plain=True):
+            return self.REFUSAL
+        return None
+
+    def _check_original(self, normalized: str) -> Optional[str]:
         if self.ENGLISH.search(normalized):
             return self.REFUSAL
         reading = bool(self.READING.search(normalized))
@@ -80,6 +167,16 @@ class SafetyGuardrail:
             if "an toàn" in sentence and not re.search(
                 r"\b(?:không|chưa|chẳng)\s+an toàn\b|"
                 r"\bkhông thể xác nhận[^.!?]{0,30}\ban toàn\b",
+                sentence
+            ):
+                # Bản cải tiến: "an toàn thực phẩm/giao thông..." là chủ đề nội dung, không phải
+                # khẳng định lối đi an toàn (bản gốc chặn nhầm câu đọc tờ giấy).
+                if not (self.mode == "mo_rong" and self.SAFETY_TOPIC.search(sentence)):
+                    return self.REFUSAL
+            if self.mode == "mo_rong" and re.search(
+                r"\b(?:không|chẳng) (?:có|thấy) (?:gì|vật gì|ai) (?:cản|chắn|vướng|nguy hiểm)"
+                r"|\b(?:cứ|có thể) (?:đi|bước|tiến) (?:thẳng|tiếp|tới)"
+                r"|\b(?:lối đi|đường đi|đường|phía trước) (?:rất |khá )?(?:trống|thông thoáng)\b",
                 sentence
             ):
                 return self.REFUSAL

@@ -1,5 +1,7 @@
+import re
 import threading
 import time
+import unicodedata
 import cv2
 from typing import Optional, List, Dict, Any, Tuple
 import numpy as np
@@ -25,6 +27,7 @@ class OCRService:
         quality_checker: Optional[ImageQualityChecker] = None,
         engine: str = "easyocr",
         read_timeout_sec: float = 10.0,
+        filter_garbage: bool = False,
     ):
         self.languages = languages or ["vi", "en"]
         self.engine = engine
@@ -34,10 +37,27 @@ class OCRService:
         # Apple Vision từng không trả về (> 40 s) khi chạy trong app; quá hạn thì coi như lỗi
         # lúc đọc và chuyển sang EasyOCR. 0 = không giới hạn.
         self.read_timeout_sec = read_timeout_sec
+        # Bản cải tiến: loại chuỗi rác (ký hiệu lẻ, 1 ký tự độ tin cậy thấp) trước khi đọc ra loa.
+        self.filter_garbage = filter_garbage
         self._reader = None
         self._using_vision = False
         self._load_attempted = False
         self._load_error: Optional[str] = None
+
+    @staticmethod
+    def is_plausible_text(text: str, confidence: float) -> bool:
+        """Chuỗi có đáng đọc ra loa không: đủ chữ/số, không chủ yếu là ký hiệu."""
+        t = unicodedata.normalize("NFC", text).strip()
+        letters = sum(1 for ch in t if ch.isalnum())
+        if letters == 0:
+            return False
+        if letters / max(1, len(t.replace(" ", ""))) < 0.5:
+            return False  # ví dụ "|||-_~" hoặc "~ ' ."
+        if letters == 1 and confidence < 0.8:
+            return False  # một ký tự lẻ thường là nhiễu mép ảnh
+        if letters <= 3 and confidence < 0.5 and not re.search(r"\d", t):
+            return False
+        return True
 
     def _ensure_reader(self) -> None:
         if self._reader is not None or self._load_attempted:
@@ -268,6 +288,8 @@ class OCRService:
             for item in raw_results:
                 bbox_poly, text, conf = item
                 clean_text = text.strip()
+                if self.filter_garbage and not self.is_plausible_text(clean_text, float(conf)):
+                    continue
                 if conf >= min_confidence and len(clean_text) > 0:
                     pts = np.array(bbox_poly, dtype=np.float32)
                     if scale != 1.0:

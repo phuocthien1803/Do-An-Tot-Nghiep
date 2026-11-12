@@ -1,39 +1,32 @@
 #!/usr/bin/env python3
 """
-Entry point chính của Hệ Thống AI Đa Phương Thức Hỗ Trợ Người Khiếm Thị.
-Khởi tạo các thành phần theo đúng kế hoạch kiến trúc và chạy ứng dụng.
+Entry point chính của Hệ Thống AI Đa Phương Thức Hỗ Trợ Người Khiếm Thị - BẢN CẢI TIẾN.
+
+Một lõi chung cho hai máy; khác biệt nền tảng nằm trong lớp phủ cấu hình:
+    python app.py --platform mac      (ban_mac/cau_hinh_mac.yaml)
+    python app.py --platform windows  (ban_windows/cau_hinh_windows.yaml)
+    python app.py                     (tự nhận nền tảng đang chạy)
+So sánh với hành vi bản gốc trên CÙNG máy:
+    python app.py --overlay configs/thu_nghiem/nhu_ban_goc.yaml
 """
 
 import argparse
 import os
 import sys
-import yaml
 
 from src.camera.camera_manager import CameraManager
-from src.detection.class_filter import ClassFilter
-from src.detection.yolo_detector import YoloDetector
-from src.tracking.byte_tracker import ByteTrackerAdapter
-from src.depth.factory import build_depth_estimator, build_roi_extractor
-from src.fusion.walking_corridor import WalkingCorridor
-from src.fusion.generic_obstacle import build_generic_obstacle_detector
-from src.fusion.spatial_zones import SpatialZones
-from src.fusion.synchronizer import Synchronizer
-from src.fusion.risk_fsm import RiskFSM
-from src.fusion.alert_aggregator import AlertAggregator
-from src.audio.tts_engine import TTSEngine
+from src.audio.tts_factory import create_tts_engine
 from src.audio.audio_coordinator import AudioCoordinator
+from src.audio.safety_channel import SafetySoundChannel
 from src.ocr.ocr_service import OCRService
 from src.ocr.image_quality import ImageQualityChecker
 from src.vqa.vqa_service import VQAService
+from src.runtime.config import PROJECT_ROOT, load_configs, load_yaml  # noqa: F401 (load_yaml giữ tương thích)
+from src.runtime.event_log import EventLog
+from src.runtime import factory
 from src.runtime.system_coordinator import SystemCoordinator
 from src.ui.hud_renderer import HUDRenderer
 from src.ui.app_runner import AppRunner
-
-def load_yaml(path: str) -> dict:
-    if os.path.exists(path):
-        with open(path, "r", encoding="utf-8") as f:
-            return yaml.safe_load(f) or {}
-    return {}
 
 
 def build_ocr_service(model_cfg: dict, device: str) -> OCRService:
@@ -49,162 +42,144 @@ def build_ocr_service(model_cfg: dict, device: str) -> OCRService:
             min_brightness=float(ocr_cfg.get("min_brightness", 40.0)),
             max_brightness=float(ocr_cfg.get("max_brightness", 235.0)),
         ),
+        filter_garbage=bool(ocr_cfg.get("filter_garbage", False)),
     )
 
-def main():
-    parser = argparse.ArgumentParser(description="Hệ thống AI đa phương thức hỗ trợ người khiếm thị")
-    parser.add_argument("--source", type=str, default=None, help="Nguồn camera: 0 (webcam), đường dẫn tệp video, hoặc 'dummy'")
-    parser.add_argument("--weights", type=str, default=None, help="Đường dẫn trọng số YOLO (mặc định: models/weights/yolov8n.pt)")
-    parser.add_argument("--device", type=str, default=None, help="Thiết bị tính toán: 'mps' hoặc 'cpu'")
-    parser.add_argument("--no-gui", action="store_true", help="Chạy ở chế độ không mở cửa sổ giao diện")
-    parser.add_argument("--duration", type=float, default=None, help="Thời lượng chạy tối đa (giây)")
-    args = parser.parse_args()
 
-    # Nạp cấu hình từ configs/
-    app_cfg = load_yaml("configs/app_config.yaml")
-    model_cfg = load_yaml("configs/model_config.yaml")
-    fusion_cfg = load_yaml("configs/fusion_rules.yaml")
-
-    cam_source = args.source if args.source is not None else app_cfg.get("camera", {}).get("source", 0)
-    device = args.device if args.device is not None else app_cfg.get("app", {}).get("device", "mps")
-    weights_path = args.weights if args.weights is not None else model_cfg.get("detection", {}).get("weights_path", "models/weights/yolov8n.pt")
-
-    print("=" * 60)
-    print("KHỞI ĐỘNG HỆ THỐNG AI ĐA PHƯƠNG THỨC HỖ TRỢ NGƯỜI KHIẾM THỊ")
-    print(f"- Nguồn camera: {cam_source}")
-    print(f"- Thiết bị tính toán: {device}")
-    print(f"- YOLO weights: {weights_path}")
-    print(f"- Giao diện GUI: {'Tắt (--no-gui)' if args.no_gui else 'Bật'}")
-    print("=" * 60)
-
-    # 1. Camera Manager
-    camera = CameraManager(
-        source=cam_source,
-        width=app_cfg.get("camera", {}).get("width", 640),
-        height=app_cfg.get("camera", {}).get("height", 480),
-        target_fps=app_cfg.get("camera", {}).get("fps", 30.0),
-        reconnect_delay_sec=float(app_cfg.get("camera", {}).get("reconnect_delay_sec", 2.0)),
-        max_reconnect_attempts=int(app_cfg.get("camera", {}).get("max_reconnect_attempts", 5))
-    )
-
-    # 2. Detection & Tracking
-    class_filter = ClassFilter(
-        enabled_classes=model_cfg.get("detection", {}).get("enabled_classes"),
-        alert_classes=model_cfg.get("detection", {}).get("alert_classes"),
-        custom_vi_names=fusion_cfg.get("labels_vi")
-    )
-    detector = YoloDetector(
-        weights_path=weights_path,
-        class_filter=class_filter,
-        confidence_threshold=model_cfg.get("detection", {}).get("confidence_threshold", 0.45),
-        device=device
-    )
-    tracker = ByteTrackerAdapter(iou_threshold=0.3)
-
-    # 3. Depth Estimation & ROI
-    depth_estimator = build_depth_estimator(model_cfg, device)
-    roi_extractor = build_roi_extractor(model_cfg, fusion_cfg)
-
-    # 4. Synchronizer & Fusion
-    walking_corridor = WalkingCorridor(**fusion_cfg.get("walking_corridor", {}))
-    spatial_cfg = fusion_cfg.get("spatial", {})
-    spatial_zones = SpatialZones(
-        left_ratio=spatial_cfg.get("left_ratio", 0.35),
-        center_ratio=spatial_cfg.get("center_ratio", 0.30),
-        right_ratio=spatial_cfg.get("right_ratio", 0.35)
-    )
-    sync_cfg = fusion_cfg.get("synchronizer", {})
-    max_pair_skew_ms = float(sync_cfg.get("max_pair_skew_ms", 600.0))
-    max_detection_age_ms = float(sync_cfg.get("max_detection_age_ms", 1000.0))
-    max_depth_age_ms = float(sync_cfg.get("max_depth_age_ms", 1200.0))
-    max_alert_age_ms = float(sync_cfg.get("max_alert_age_ms", 1500.0))
-
-    synchronizer = Synchronizer(
-        max_pair_skew_ms=max_pair_skew_ms,
-        max_detection_age_ms=max_detection_age_ms,
-        max_depth_age_ms=max_depth_age_ms,
-        max_alert_age_ms=max_alert_age_ms
-    )
-    fsm_cfg = fusion_cfg.get("risk_fsm", {})
-    risk_fsm = RiskFSM(
-        class_filter=class_filter,
-        spatial_zones=spatial_zones,
-        walking_corridor=walking_corridor,
-        roi_extractor=roi_extractor,
-        depth_threshold_high=float(fsm_cfg.get("depth_threshold_high", 0.75)),
-        depth_threshold_medium=float(fsm_cfg.get("depth_threshold_medium", 0.45)),
-        depth_threshold_low=float(fsm_cfg.get("depth_threshold_low", 0.25)),
-        confirmations_to_escalate=int(fsm_cfg.get("confirmations_to_escalate", 1)),
-        confirmations_to_deescalate=int(fsm_cfg.get("confirmations_to_deescalate", 3)),
-        instant_high_risk_in_center=bool(fsm_cfg.get("instant_high_risk_in_center", True)),
-        cooldown_sec=float(fsm_cfg.get("track_alert_cooldown_sec", 4.0)),
-        allow_escalation_override=bool(fsm_cfg.get("allow_escalation_override", True)),
-        generic_obstacle_detector=build_generic_obstacle_detector(fusion_cfg, walking_corridor)
-    )
-    agg_cfg = fusion_cfg.get("alert_aggregator", {})
-    alert_aggregator = AlertAggregator(
-        risk_fsm=risk_fsm,
-        alert_lifetime_sec=float(agg_cfg.get("alert_lifetime_sec", fsm_cfg.get("alert_lifetime_sec", 3.0))),
-        global_alert_interval_sec=float(agg_cfg.get("global_alert_interval_sec", 3.5)),
-        max_detection_age_ms=max_detection_age_ms,
-        max_depth_age_ms=max_depth_age_ms,
-        max_alert_age_ms=max_alert_age_ms
-    )
-
-    # 5. Audio Coordinator
-    audio_cfg = app_cfg.get("audio", {})
-    tts_engine = TTSEngine(
-        voice=audio_cfg.get("voice", "Linh"),
-        speech_rate_wpm=audio_cfg.get("speech_rate_wpm", 200)
-    )
-    audio_coordinator = AudioCoordinator(tts_engine=tts_engine)
-
-    # 6. On-Demand OCR & VQA
-    ocr_service = build_ocr_service(model_cfg, device)
+def build_vqa_service(model_cfg: dict, device: str) -> VQAService:
     vqa_cfg = model_cfg.get("vqa", {})
-    vqa_service = VQAService(
+    guard_cfg = vqa_cfg.get("guardrail", {}) or {}
+    return VQAService(
         device=device,
         use_vlm=vqa_cfg.get("use_vlm", True),
         backend_name=vqa_cfg.get("backend", "legacy_caption"),
         caption_model_name=vqa_cfg.get("caption_model_name", "Salesforce/blip-image-captioning-base"),
         translation_model_name=vqa_cfg.get("translation_model_name", "Helsinki-NLP/opus-mt-en-vi"),
         lazy_load=True,
-        mlx_vlm_config=vqa_cfg.get("mlx_vlm", {})
+        mlx_vlm_config=vqa_cfg.get("mlx_vlm", {}),
+        guardrail_mode=guard_cfg.get("mode", "regex"),
+        answer_style=vqa_cfg.get("answer_style", "goc"),
     )
 
-    # 7. System Coordinator
+
+def build_voice_input(app_cfg: dict):
+    asr = app_cfg.get("asr", {}) or {}
+    if not asr.get("enabled", False):
+        return None
+    from src.asr.voice_input import VoiceInput
+    return VoiceInput(
+        model_path=asr.get("model_path", "models/weights/faster_whisper_small_model"),
+        model_size=asr.get("model_size", "small"),
+        language=asr.get("language", "vi"),
+        record_sec=float(asr.get("record_sec", 5.0)),
+        device=asr.get("device", "cpu"),
+        compute_type=asr.get("compute_type", "int8"),
+    )
+
+
+def parse_args(argv=None):
+    parser = argparse.ArgumentParser(description="Hệ thống AI đa phương thức hỗ trợ người khiếm thị (bản cải tiến)")
+    parser.add_argument("--source", type=str, default=None, help="Nguồn camera: 0 (webcam), đường dẫn tệp video, hoặc 'dummy'")
+    parser.add_argument("--weights", type=str, default=None, help="Đường dẫn trọng số YOLO")
+    parser.add_argument("--device", type=str, default=None, help="Thiết bị tính toán: 'mps' hoặc 'cpu'")
+    parser.add_argument("--platform", type=str, default="auto", choices=["auto", "mac", "windows", "none"],
+                        help="Lớp phủ cấu hình nền tảng (mặc định tự nhận)")
+    parser.add_argument("--overlay", action="append", default=[],
+                        help="Tệp lớp phủ cấu hình thêm (lặp lại được), ví dụ configs/thu_nghiem/nhu_ban_goc.yaml")
+    parser.add_argument("--event-log", type=str, default=None, help="Ghi nhật ký sự kiện JSONL (đo độ trễ)")
+    parser.add_argument("--no-gui", action="store_true", help="Chạy ở chế độ không mở cửa sổ giao diện")
+    parser.add_argument("--duration", type=float, default=None, help="Thời lượng chạy tối đa (giây)")
+    return parser.parse_args(argv)
+
+
+def main(argv=None):
+    args = parse_args(argv)
+    os.chdir(PROJECT_ROOT)
+    cfg = load_configs(PROJECT_ROOT, platform=args.platform, overlays=args.overlay)
+    app_cfg, model_cfg = cfg["app"], cfg["model"]
+
+    cam_source = args.source if args.source is not None else app_cfg.get("camera", {}).get("source", 0)
+    device = args.device if args.device is not None else app_cfg.get("app", {}).get("device", "mps")
+
+    print("=" * 60)
+    print("KHỞI ĐỘNG HỆ THỐNG AI HỖ TRỢ NGƯỜI KHIẾM THỊ - BẢN CẢI TIẾN")
+    print(f"- Nền tảng / lớp phủ: {cfg['_meta']['platform']} / "
+          f"{[os.path.basename(p) for p in cfg['_meta']['overlays']]}")
+    print(f"- Nguồn camera: {cam_source}")
+    print(f"- Thiết bị tính toán: {device}")
+    print(f"- Giao diện GUI: {'Tắt (--no-gui)' if args.no_gui else 'Bật'}")
+    print("=" * 60)
+
+    camera_cfg = app_cfg.get("camera", {})
+    camera = CameraManager(
+        source=cam_source,
+        width=camera_cfg.get("width", 640),
+        height=camera_cfg.get("height", 480),
+        target_fps=camera_cfg.get("fps", 30.0),
+        reconnect_delay_sec=float(camera_cfg.get("reconnect_delay_sec", 2.0)),
+        max_reconnect_attempts=int(camera_cfg.get("max_reconnect_attempts", 5))
+    )
+
+    earcons = factory.build_earcons(cfg)
+    stack = factory.build_risk_stack(cfg, earcons)
+    detector = factory.build_detector(cfg, device, stack["class_filter"], args.weights)
+    depth_estimator = factory.build_depth(cfg, device)
+
+    audio_cfg = app_cfg.get("audio", {})
+    audio_coordinator = AudioCoordinator(tts_engine=create_tts_engine(audio_cfg))
+    safety_cfg = app_cfg.get("safety", {}) or {}
+    safety_channel = None
+    if earcons is not None and safety_cfg.get("beeper", False):
+        safety_channel = SafetySoundChannel(
+            audio_coordinator, earcons,
+            ticks_in_warning=bool(safety_cfg.get("ticks_in_warning", True)),
+            ticks_in_on_demand=bool(safety_cfg.get("ticks_in_on_demand", True)),
+        )
+
+    event_log = EventLog(args.event_log)
+    runtime_cfg = app_cfg.get("runtime", {})
     coordinator = SystemCoordinator(
         camera_manager=camera,
         detector=detector,
-        tracker=tracker,
+        tracker=stack["tracker"],
         depth_estimator=depth_estimator,
-        synchronizer=synchronizer,
-        risk_fsm=risk_fsm,
-        alert_aggregator=alert_aggregator,
+        synchronizer=stack["synchronizer"],
+        risk_fsm=stack["risk_fsm"],
+        alert_aggregator=stack["aggregator"],
         audio_coordinator=audio_coordinator,
-        ocr_service=ocr_service,
-        vqa_service=vqa_service,
-        watchdog_timeout_sec=float(app_cfg.get("runtime", {}).get("watchdog_timeout_sec", 3.0))
+        ocr_service=build_ocr_service(model_cfg, device),
+        vqa_service=build_vqa_service(model_cfg, device),
+        watchdog_timeout_sec=float(runtime_cfg.get("watchdog_timeout_sec", 3.0)),
+        safety_channel=safety_channel,
+        on_demand_high_alert=safety_cfg.get("on_demand_high_alert", "off"),
+        earcons=earcons,
+        event_log=event_log,
+        voice_input=build_voice_input(app_cfg),
+        auto_return_warning_sec=float(app_cfg.get("ui", {}).get("auto_return_warning_sec", 0.0)),
+        startup_grace_max_sec=runtime_cfg.get("startup_grace_max_sec"),
+        min_frame_brightness=float(runtime_cfg.get("min_frame_brightness", 0.0) or 0.0),
     )
 
-    # 8. App Runner
-    preview_w = app_cfg.get("runtime", {}).get("preview_width", 800)
-    preview_h = app_cfg.get("runtime", {}).get("preview_height", 600)
     hud_renderer = HUDRenderer(
-        target_width=preview_w,
-        target_height=preview_h,
+        target_width=runtime_cfg.get("preview_width", 800),
+        target_height=runtime_cfg.get("preview_height", 600),
         config=app_cfg.get("ui", {}),
-        walking_corridor=walking_corridor
+        walking_corridor=stack["corridor"]
     )
-
+    ui_cfg = app_cfg.get("ui", {})
     runner = AppRunner(
         coordinator=coordinator,
         hud_renderer=hud_renderer,
         enable_gui=(not args.no_gui),
-        duration_sec=args.duration
+        duration_sec=args.duration,
+        headless_keyboard=bool(ui_cfg.get("headless_keyboard", False)),
+        global_hotkeys=bool(ui_cfg.get("global_hotkeys", False)),
     )
+    try:
+        runner.run()
+    finally:
+        event_log.close()
 
-    runner.run()
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

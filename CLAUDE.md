@@ -2,6 +2,19 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Bản cải tiến (thư mục này)
+
+Thư mục `Do-An-Tot-Nghiep-CaiTien` là bản cải tiến dựng từ mã GitHub b020e38 (commit/tag `ban-goc`).
+Danh sách thay đổi, cách so sánh và giới hạn: `BAO_CAO_CAI_TIEN.md`. Điểm khác về kiến trúc:
+- `src/runtime/config.py` ghép `configs/*.yaml` + lớp phủ nền tảng (`ban_mac/cau_hinh_mac.yaml`,
+  `ban_windows/cau_hinh_windows.yaml`) + lớp phủ thí nghiệm (`configs/thu_nghiem/*.yaml`, `--overlay`).
+- `src/runtime/factory.py` dựng toàn bộ pipeline cho app.py, scripts và benchmark (wire tuỳ chọn mới ở đây).
+- Mới: `src/tracking/bytetrack.py`, `src/fusion/ttc.py`, `src/depth/floor_model.py`,
+  `src/fusion/floor_hazards.py`, `src/audio/{earcons,safety_channel,tts_factory}.py`, `src/asr/voice_input.py`,
+  `src/runtime/event_log.py`, `ban_windows/windows_tts.py`.
+- Giá trị mặc định trong code giữ hành vi gốc; cấu hình bật cải tiến. Test gốc vẫn kiểm tra hành vi gốc,
+  test `tests/test_cai_tien_*.py` kiểm tra cải tiến.
+
 ## Project
 
 Offline assistive app for visually impaired users, running locally on macOS Apple Silicon (target: M1, 16 GB). A camera feeds continuous obstacle detection + metric depth estimation that drive Vietnamese audio warnings; OCR and VQA run only on user request. Docs, comments, config comments and all user-facing/spoken strings are in Vietnamese — keep new ones in Vietnamese. `AGENTS.md` holds the binding project rules (summarized below); `CLI.md` documents every script's flags; `README.md` explains behavior and safety limits.

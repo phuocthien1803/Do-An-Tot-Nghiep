@@ -24,8 +24,8 @@ import time
 import cv2
 import numpy as np
 
-from common import (build_depth, build_detector, build_risk_stack, load_configs, make_packet,
-                    save_json, summarize)
+from common import (add_config_args, build_depth, build_detector, build_risk_stack, load_configs,
+                    make_packet, save_json, summarize)
 
 EIGEN_CROP = (slice(45, 471), slice(41, 601))
 MIN_D, MAX_D = 1e-3, 10.0
@@ -95,6 +95,7 @@ def main():
     ap.add_argument("--nyu-dir", required=True)
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--device", default="mps")
+    add_config_args(ap)
     args = ap.parse_args()
 
     from src.contracts.risk import DataQuality, RiskLevel
@@ -102,7 +103,10 @@ def main():
 
     from src.contracts.depth_map import DepthRepresentation
 
-    cfg = load_configs()
+    # NYU là ảnh đơn lẻ, không phải video: tự hiệu chỉnh sàn không được làm mượt giữa các ảnh
+    # (dùng thêm --overlay configs/thu_nghiem/anh_don_le.yaml), TTC không áp dụng.
+    cfg = load_configs(args.overlay, args.platform)
+    cfg["app"].setdefault("camera", {})["hfov_deg"] = 63.0  # Kinect v1 của NYU: fx ~ 519 px
     detector = build_detector(cfg, device=args.device)
     depth_sys = build_depth(cfg, device=args.device)  # đúng cấu hình app hiện tại
     depth_rel = build_depth(cfg, device=args.device, representation="relative_depth",
@@ -221,7 +225,7 @@ def main():
     }
     report["latency_ms"] = {k: summarize(v) for k, v in lat.items()}
     report["objects"] = obj_rows
-    path = save_json("depth_warning_nyu.json", report)
+    path = save_json(f"depth_warning_nyu{args.tag}.json", report)
     print(json.dumps({k: v for k, v in report.items() if k not in ("objects",)}, ensure_ascii=False, indent=1)[:4000])
     print("saved", path)
 

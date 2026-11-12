@@ -1,0 +1,8 @@
+# Lớp phủ cho bộ dữ liệu ẢNH ĐƠN LẺ (NYU, COCO...): mỗi ảnh là một cảnh khác nhau nên hệ số
+# tự hiệu chỉnh theo sàn không được làm mượt giữa các ảnh (ema_alpha = 1: dùng hệ số của
+# chính ảnh đó; ảnh không thấy sàn dùng hệ số của ảnh trước - xem ghi chú trong báo cáo).
+mo_ta: "Ảnh đơn lẻ: không làm mượt hệ số độ sâu giữa các ảnh"
+model_config:
+  depth:
+    auto_scale:
+      ema_alpha: 1.0

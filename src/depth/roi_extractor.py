@@ -72,6 +72,20 @@ class ROIExtractor:
         return "ở xa"
 
     def extract_proximity(self, bbox: BoundingBox, depth_map: DepthMap) -> Tuple[float, str, str]:
+        """Giữ giao diện cũ: (điểm độ gần, mô tả, lý do)."""
+        score, desc, reason, _ = self.extract_with_distance(bbox, depth_map)
+        return score, desc, reason
+
+    def extract_with_distance(self, bbox: BoundingBox, depth_map: DepthMap
+                              ) -> Tuple[float, str, str, Optional[float]]:
+        """Như extract_proximity, thêm khoảng cách mét (None với relative depth hoặc ROI lỗi).
+
+        Khoảng cách chỉ dùng nội bộ (TTC, HUD, đánh giá); câu nói không bao giờ đọc số mét.
+        """
+        score, desc, reason, distance = self._extract(bbox, depth_map)
+        return score, desc, reason, distance
+
+    def _extract(self, bbox: BoundingBox, depth_map: DepthMap) -> Tuple[float, str, str, Optional[float]]:
         """
         Trích xuất mức độ gần tương đối cho một BoundingBox.
         Trả về:
@@ -100,7 +114,7 @@ class ROIExtractor:
             y2 = int(round(min(h_depth, bbox.ymax)))
 
         if x2 <= x1 or y2 <= y1:
-            return 0.0, "chưa rõ", "BBox nằm ngoài phạm vi ảnh hoặc diện tích bằng 0"
+            return 0.0, "chưa rõ", "BBox nằm ngoài phạm vi ảnh hoặc diện tích bằng 0", None
 
         roi_values = depth_map.values[y1:y2, x1:x2]
         roi_mask = depth_map.valid_mask[y1:y2, x1:x2]
@@ -110,17 +124,17 @@ class ROIExtractor:
 
         # 2. Kiểm tra chất lượng dữ liệu vùng ROI
         if valid_pixels_count < self.min_valid_pixels or (valid_pixels_count / max(1, total_roi_pixels)) < self.min_valid_ratio:
-            return 0.0, "chưa rõ", f"Không đủ pixel hợp lệ trong ROI ({valid_pixels_count}/{total_roi_pixels})"
+            return 0.0, "chưa rõ", f"Không đủ pixel hợp lệ trong ROI ({valid_pixels_count}/{total_roi_pixels})", None
 
         # 3a. Độ sâu metric: dùng khoảng cách phần gần nhất của vật, không chuẩn hoá theo frame
         if depth_map.representation == DepthRepresentation.METRIC_DEPTH:
             roi_meters = roi_values[roi_mask]
             distance = float(np.percentile(roi_meters, 100.0 - self.percentile))
             if not np.isfinite(distance):
-                return 0.0, "chưa rõ", "Khoảng cách ROI không hợp lệ"
+                return 0.0, "chưa rõ", "Khoảng cách ROI không hợp lệ", None
             score = self.score_from_distance(distance)
             reason = f"Khoảng cách ước lượng {distance:.1f} m ({valid_pixels_count}px)"
-            return score, self.describe(score, metric=True), reason
+            return score, self.describe(score, metric=True), reason, distance
 
         # 3. Chuẩn hóa giá trị độ sâu của toàn khung hình về [0, 1] (tối ưu cache theo frame_id)
         if self._cached_frame_id != depth_map.frame_id or self._cached_norm_depth is None:
@@ -139,4 +153,4 @@ class ROIExtractor:
 
         # 5. Phân nhóm mô tả độ gần tương đối (không khẳng định khoảng cách mét tuyệt đối)
         reason = f"Độ gần tương đối {score*100:.0f}% ({valid_pixels_count}px)"
-        return score, self.describe(score), reason
+        return score, self.describe(score), reason, None

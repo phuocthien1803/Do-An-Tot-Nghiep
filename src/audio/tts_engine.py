@@ -17,6 +17,7 @@ class TTSEngine:
         self.voice = voice
         self.speech_rate_wpm = speech_rate_wpm
         self._current_process: Optional[subprocess.Popen] = None
+        self._earcon_process: Optional[subprocess.Popen] = None
 
     def speak(self, text: str) -> bool:
         """Phát âm một chuỗi văn bản bằng giọng tiếng Việt macOS."""
@@ -50,6 +51,32 @@ class TTSEngine:
         except Exception as e:
             print(f"[TTSEngine] Lỗi khởi chạy afplay: {e}")
             return False
+
+    def play_earcon(self, sound_file: str) -> bool:
+        """Bản cải tiến: phát âm báo ngắn KHÔNG chặn và KHÔNG ngắt lời nói đang phát.
+
+        Dùng tiến trình afplay riêng nên chạy song song với 'say' (ví dụ tiếng bíp an toàn
+        trong lúc đang đọc kết quả OCR/VQA). Âm báo trước đó (nếu còn) bị thay thế.
+        """
+        if not sound_file or not os.path.exists(sound_file):
+            return False
+        self.stop_earcon()
+        try:
+            self._earcon_process = subprocess.Popen(
+                ["afplay", sound_file], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return True
+        except Exception as e:
+            print(f"[TTSEngine] Lỗi phát âm báo: {e}")
+            return False
+
+    def stop_earcon(self) -> None:
+        proc = self._earcon_process
+        if proc is not None and proc.poll() is None:
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+        self._earcon_process = None
 
     def stop(self) -> None:
         """Ngắt ngay lập tức âm thanh đang phát."""

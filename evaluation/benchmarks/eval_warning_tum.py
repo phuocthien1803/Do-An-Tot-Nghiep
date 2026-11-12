@@ -22,8 +22,7 @@ import time
 import cv2
 import numpy as np
 
-from common import (build_depth, build_detector, build_risk_stack, load_configs, make_packet,
-                    save_json, summarize)
+from common import (add_config_args, build_depth, load_configs, make_packet, save_json, summarize)
 
 
 def read_list(path):
@@ -61,33 +60,26 @@ def main():
     ap.add_argument("--device", default="mps")
     ap.add_argument("--depth-every", type=int, default=4, help="30fps/4 ≈ 7.5 Hz như depth worker")
     ap.add_argument("--near-m", type=float, default=1.0)
+    ap.add_argument("--camera-height-m", type=float, default=None,
+                    help="Ghi đè độ cao camera cho tự hiệu chỉnh độ sâu (TUM: camera cầm tay)")
+    add_config_args(ap)
     args = ap.parse_args()
 
-    from src.fusion.alert_aggregator import AlertAggregator
-    from src.fusion.synchronizer import Synchronizer
     from src.contracts.risk import RiskLevel
-    from src.tracking.byte_tracker import ByteTrackerAdapter
+    from src.runtime import factory
 
-    cfg = load_configs()
-    detector = build_detector(cfg, device=args.device)
+    cfg = load_configs(args.overlay, args.platform)
+    if args.camera_height_m is not None:
+        cfg["app"].setdefault("camera", {})["height_m"] = args.camera_height_m
+    # TUM fr1/fr2/fr3 đều 640x480; trường nhìn ngang Kinect ~ 62 độ (fx ~ 517-535 px)
+    cfg["app"].setdefault("camera", {})["hfov_deg"] = 62.5  # fx 517-535 px ở 640 px ngang
+    stack = factory.build_risk_stack(cfg)
+    detector = factory.build_detector(cfg, args.device, stack["class_filter"])
     depth_est = build_depth(cfg, device=args.device)
-    tracker = ByteTrackerAdapter(iou_threshold=0.3)
-    sc = cfg["fusion"].get("synchronizer", {})
-    sync = Synchronizer(max_pair_skew_ms=float(sc.get("max_pair_skew_ms", 600)),
-                        max_detection_age_ms=float(sc.get("max_detection_age_ms", 1000)),
-                        max_depth_age_ms=float(sc.get("max_depth_age_ms", 1200)),
-                        max_alert_age_ms=float(sc.get("max_alert_age_ms", 1500)))
-    fsm, roi, corridor = build_risk_stack(cfg)
-    ac = cfg["fusion"].get("alert_aggregator", {})
-    aggregator = AlertAggregator(
-        risk_fsm=fsm,
-        alert_lifetime_sec=float(ac.get("alert_lifetime_sec", 3.0)),
-        global_alert_interval_sec=float(ac.get("global_alert_interval_sec", 3.5)),
-        max_detection_age_ms=float(sc.get("max_detection_age_ms", 1000)),
-        max_depth_age_ms=float(sc.get("max_depth_age_ms", 1200)),
-        max_alert_age_ms=float(sc.get("max_alert_age_ms", 1500)),
-    )
+    tracker, sync = stack["tracker"], stack["synchronizer"]
+    fsm, corridor, aggregator = stack["risk_fsm"], stack["corridor"], stack["aggregator"]
     erosion = float(cfg["model"]["depth"].get("roi_erosion_ratio", 0.15))
+    scale_rows = []
 
     frames = associate(read_list(os.path.join(args.seq_dir, "rgb.txt")),
                        read_list(os.path.join(args.seq_dir, "depth.txt")))
@@ -110,6 +102,14 @@ def main():
             dm = depth_est.estimate(packet)
             lat_depth.append((time.monotonic() - t0) * 1000.0)
             sync.register_depth(dm)
+            # Hệ số "tối ưu" của riêng frame này theo GT, để so với hệ số cố định và tự hiệu chỉnh.
+            applied = float(dm.preprocess_transform.get("metric_scale") or 1.0)
+            raw = dm.values / max(applied, 1e-6)
+            ok = (gt > 0.1) & dm.valid_mask & (raw > 0.05)
+            if ok.sum() > 1000:
+                floor = dm.preprocess_transform.get("floor") or {}
+                scale_rows.append({"oracle": float(np.median(gt[ok] / raw[ok])), "applied": applied,
+                                   "floor_valid": bool(floor.get("valid", False))})
         det = detector.detect(packet)
         lat_det.append(det.latency_ms)
         tracked = tracker.update(det)
@@ -174,12 +174,22 @@ def main():
             for r in sorted({o["risk"] for o in obj_rows})
         },
         "alert_classes_seen": dict(Counter(o["class"] for o in obj_rows)),
+        "config": {"overlays": cfg["_meta"]["overlays"], "risk_model": fsm.risk_model,
+                   "tracker": type(tracker).__name__,
+                   "auto_scale": bool(cfg["model"]["depth"].get("auto_scale", {}).get("enabled"))},
+        "depth_scale_vs_oracle": {
+            "applied_abs_rel_err": summarize([abs(r["applied"] - r["oracle"]) / r["oracle"] for r in scale_rows]),
+            "fixed_cfg_abs_rel_err": summarize([
+                abs(float(cfg["model"]["depth"].get("metric_scale", 1.0)) - r["oracle"]) / r["oracle"]
+                for r in scale_rows]),
+            "floor_valid_ratio": (sum(r["floor_valid"] for r in scale_rows) / len(scale_rows)) if scale_rows else None,
+        },
         "spoken_alerts": {"count": len(spoken),
                           "per_minute": len(spoken) / (duration / 60) if duration else None,
                           "samples": spoken[:15]},
         "latency_ms": {"detect": summarize(lat_det), "depth": summarize(lat_depth)},
     }
-    path = save_json(f"warning_tum_{report['sequence']}.json", report)
+    path = save_json(f"warning_tum_{report['sequence']}{args.tag}.json", report)
     print(json.dumps(report, ensure_ascii=False, indent=1)[:3500])
     print("saved", path)
 

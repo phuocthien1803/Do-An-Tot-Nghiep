@@ -2,6 +2,7 @@
 detection:
   model_name: "yolov8n"
   weights_path: "models/weights/yolov8n.pt"
+  fallback_weights_path: "models/weights/yolov8n.pt" # dùng khi weights_path không có trên máy
   confidence_threshold: 0.25
   iou_threshold: 0.45
   device: "mps" # mps | cpu
@@ -32,6 +33,13 @@ detection:
     - "sink"
     - "refrigerator"
     - "toilet"
+    # [Cải tiến] vật cản thường gặp trên lối đi mà bản gốc chưa bật
+    - "bench"
+    - "potted plant"
+    - "suitcase"
+    - "bicycle"
+    - "motorcycle"
+    - "backpack"
   # Nhóm đối tượng có thể gây va chạm cần kích hoạt cảnh báo nguy cơ
   alert_classes:
     - "person"
@@ -44,9 +52,23 @@ detection:
     - "refrigerator"
     - "toilet"
     - "sink"
-    - "laptop"
     - "tv"
-    - "cell phone"
+    # [Cải tiến] bỏ "laptop", "cell phone" (vật nhỏ trên bàn - cái bàn mới là vật cản);
+    # thêm vật cản thấp/trên lối đi
+    - "bench"
+    - "potted plant"
+    - "suitcase"
+    - "bicycle"
+    - "motorcycle"
+    - "backpack"
+
+# [Cải tiến] Theo vết: bytetrack (Kalman + ghép 2 tầng, src/tracking/bytetrack.py) | iou (bản gốc)
+tracking:
+  type: "bytetrack"
+  low_threshold: 0.10   # detection 0.10-0.25 chỉ dùng để NỐI TIẾP track (ảnh nhoè chuyển động)
+  first_match_iou: 0.2
+  second_match_iou: 0.5
+  max_lost_sec: 1.0
 
 depth:
   # Metric-Indoor cho khoảng cách theo mét. Bản relative (Depth-Anything-V2-Small-hf +
@@ -63,6 +85,14 @@ depth:
   roi_erosion_ratio: 0.15 # co viền 15% để tránh nhiễu phông nền
   input_height: 256 # kích thước suy luận tối ưu cho Apple Silicon (50ms ~ 20 FPS)
   input_width: 256
+  # Lưu ý: bộ tiền xử lý Depth Anything giữ tỉ lệ ảnh (keep_aspect_ratio) nên 256x256 với ảnh
+  # 640x480 thực chất là 252x336 - KHÔNG bị ép vuông (đính chính nhận xét phản biện trước đó).
+  # [Cải tiến] Tự hiệu chỉnh hệ số mét theo mặt sàn mỗi frame (src/depth/floor_model.py);
+  # metric_scale ở trên chỉ còn là giá trị dự phòng khi chưa thấy sàn.
+  auto_scale:
+    enabled: true
+    min_inlier_ratio: 0.45
+    ema_alpha: 0.25
 
 ocr:
   engine: "vision" # vision (macOS) | easyocr
@@ -73,6 +103,7 @@ ocr:
   min_brightness: 40.0 # dưới ngưỡng này cảnh báo ảnh quá tối
   max_brightness: 240.0 # trên ngưỡng này cảnh báo lóa sáng
   read_timeout_sec: 10.0 # Vision không trả về trong thời gian này -> chuyển sang EasyOCR
+  filter_garbage: true # [Cải tiến] bỏ chuỗi ký hiệu/ký tự lẻ độ tin cậy thấp trước khi đọc ra loa
 
 vqa:
   backend: "mlx_vlm" # legacy_caption | disabled | mlx_vlm
@@ -81,6 +112,9 @@ vqa:
   translation_model_name: "Helsinki-NLP/opus-mt-en-vi"
   device: "mps" # mps | cpu
   max_tokens: 45
+  answer_style: "ngan" # [Cải tiến] ngan = trả lời thẳng, bỏ tiền tố "Khung cảnh:" | goc
+  guardrail:
+    mode: "mo_rong"    # [Cải tiến] mo_rong | regex (bản gốc)
   mlx_vlm:
     # Repo ID chỉ được script download_models.py sử dụng, không dùng ở runtime.
     hf_repo_id: "mlx-community/Qwen2.5-VL-3B-Instruct-4bit"

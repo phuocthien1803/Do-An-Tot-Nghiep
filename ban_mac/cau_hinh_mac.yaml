@@ -1,0 +1,35 @@
+# ======================================================================
+#  BẢN MAC (Apple Silicon M1 16 GB) - lớp phủ cấu hình nền tảng
+#  Tự áp dụng khi chạy trên macOS (python app.py) hoặc ép bằng --platform mac.
+# ======================================================================
+mo_ta: "Bản Mac: MPS + giọng Linh + Apple Vision + Qwen2.5-VL (MLX)"
+
+app_config:
+  app:
+    device: "mps"
+  audio:
+    engine: "say"      # macOS 'say' + 'afplay'
+    voice: "Linh"
+  runtime:
+    startup_grace_max_sec: 20.0
+
+model_config:
+  detection:
+    device: "mps"
+    # Mac đủ nhanh cho YOLOv8s (COCO mAP50 0,672 so với 0,596 của bản n, +13 ms/frame trên M1).
+    # Chưa có tệp này thì tự dùng yolov8n (fallback_weights_path). Tải: scripts/download_models.py --yolov8s
+    weights_path: "models/weights/yolov8s.pt"
+    fallback_weights_path: "models/weights/yolov8n.pt"
+  depth:
+    device: "mps"
+    # Độ phân giải cao hơn bản gốc (thực tế 364x490 thay vì 252x336, vẫn giữ tỉ lệ ảnh).
+    # Hệ số mét đổi theo độ phân giải: auto_scale tự hiệu chỉnh; nếu tắt auto_scale thì chạy lại
+    # scripts/calibrate_depth.py hoặc đặt lại input 256 để dùng metric_scale 0.60 đã đo.
+    input_height: 364
+    input_width: 364
+  ocr:
+    engine: "vision"
+    device: "mps"
+  vqa:
+    backend: "mlx_vlm"
+    device: "mps"

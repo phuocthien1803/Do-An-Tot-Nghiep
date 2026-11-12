@@ -22,6 +22,9 @@ class AudioTask:
     expires_at: float = 0.0 # 0 nghĩa là không hết hạn
     interruptible: bool = True
     task_id: str = ""
+    # Bản cải tiến: thời điểm chụp frame nguồn (monotonic) để đo độ trễ camera -> âm thanh.
+    source_timestamp: Optional[float] = None
+    category: str = ""  # alert | status | on_demand | info | feedback (phục vụ nhật ký sự kiện)
 
     def is_expired(self, current_mono: Optional[float] = None) -> bool:
         if self.expires_at <= 0.0:

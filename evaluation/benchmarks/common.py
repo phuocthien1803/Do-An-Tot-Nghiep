@@ -24,15 +24,18 @@ from src.contracts.frame_packet import FramePacket  # noqa: E402
 RESULTS_DIR = os.path.join(PROJECT_ROOT, "evaluation", "results", "real_data")
 
 
-def load_configs() -> Dict[str, dict]:
-    def _load(name):
-        with open(os.path.join(PROJECT_ROOT, "configs", name), encoding="utf-8") as f:
-            return yaml.safe_load(f) or {}
-    return {
-        "app": _load("app_config.yaml"),
-        "model": _load("model_config.yaml"),
-        "fusion": _load("fusion_rules.yaml"),
-    }
+def load_configs(overlays=None, platform: str = "none") -> Dict[str, dict]:
+    """Cấu hình như app; bản cải tiến cho phép ghép lớp phủ (ví dụ configs/thu_nghiem/nhu_ban_goc.yaml)."""
+    from src.runtime.config import load_configs as _load_all
+    return _load_all(PROJECT_ROOT, platform=platform, overlays=overlays or ())
+
+
+def add_config_args(parser) -> None:
+    """Tham số chung chọn biến thể cấu hình cho mọi benchmark."""
+    parser.add_argument("--overlay", action="append", default=[],
+                        help="Lớp phủ cấu hình (lặp lại được), ví dụ configs/thu_nghiem/nhu_ban_goc.yaml")
+    parser.add_argument("--platform", default="none", choices=["none", "mac", "windows", "auto"])
+    parser.add_argument("--tag", default="", help="Hậu tố tên tệp kết quả, ví dụ _goc hoặc _caitien")
 
 
 def make_packet(image_bgr: np.ndarray, frame_id: int, timestamp: Optional[float] = None) -> FramePacket:
@@ -77,42 +80,14 @@ def build_depth(cfg, device="mps", model_name=None, representation=None, metric_
         dep["representation"] = representation
     if metric_scale is not None:
         dep["metric_scale"] = metric_scale
-    return build_depth_estimator({"depth": dep}, device)
+    return build_depth_estimator({"depth": dep}, device, app_cfg=cfg.get("app"))
 
 
 def build_risk_stack(cfg):
-    """RiskFSM + các phụ thuộc, tham số y hệt app.py."""
-    from src.depth.factory import build_roi_extractor
-    from src.fusion.generic_obstacle import build_generic_obstacle_detector
-    from src.fusion.risk_fsm import RiskFSM
-    from src.fusion.spatial_zones import SpatialZones
-    from src.fusion.walking_corridor import WalkingCorridor
-    fus = cfg["fusion"]
-    roi = build_roi_extractor(cfg["model"], fus)
-    corridor = WalkingCorridor(**fus.get("walking_corridor", {}))
-    sp = fus.get("spatial", {})
-    zones = SpatialZones(
-        left_ratio=sp.get("left_ratio", 0.35),
-        center_ratio=sp.get("center_ratio", 0.30),
-        right_ratio=sp.get("right_ratio", 0.35),
-    )
-    rc = fus.get("risk_fsm", {})
-    fsm = RiskFSM(
-        class_filter=build_class_filter(cfg),
-        spatial_zones=zones,
-        roi_extractor=roi,
-        depth_threshold_high=rc.get("depth_threshold_high", 0.75),
-        depth_threshold_medium=rc.get("depth_threshold_medium", 0.45),
-        depth_threshold_low=rc.get("depth_threshold_low", 0.25),
-        confirmations_to_escalate=rc.get("confirmations_to_escalate", 1),
-        confirmations_to_deescalate=rc.get("confirmations_to_deescalate", 3),
-        instant_high_risk_in_center=rc.get("instant_high_risk_in_center", True),
-        cooldown_sec=rc.get("track_alert_cooldown_sec", 4.0),
-        allow_escalation_override=rc.get("allow_escalation_override", True),
-        walking_corridor=corridor,
-        generic_obstacle_detector=build_generic_obstacle_detector(fus, corridor),
-    )
-    return fsm, roi, corridor
+    """RiskFSM + các phụ thuộc, dựng bằng đúng src/runtime/factory.py như app.py (bản cải tiến)."""
+    from src.runtime import factory
+    stack = factory.build_risk_stack(cfg)
+    return stack["risk_fsm"], stack["roi"], stack["corridor"]
 
 
 def patch_vision_options() -> None:

@@ -2,7 +2,7 @@ import queue
 import threading
 import time
 from dataclasses import dataclass
-from typing import Optional, Dict
+from typing import Callable, Optional, Dict
 
 from src.contracts.audio import AudioTask, AudioPriority
 from src.audio.tts_engine import TTSEngine
@@ -37,6 +37,9 @@ class AudioCoordinator:
         self._dropped_expired_count = 0
         self._interrupted_count = 0
         self._pending_tasks_count = 0
+        # Bản cải tiến: báo cho coordinator khi một task BẮT ĐẦU phát (đo độ trễ, nhật ký sự kiện).
+        self.playback_listener: Optional[Callable[[AudioTask, float], None]] = None
+        self.earcon_listener: Optional[Callable[[str, float], None]] = None
 
     def start(self) -> None:
         with self._current_lock:
@@ -90,6 +93,10 @@ class AudioCoordinator:
             if now - last_time < self.dedup_window_sec and task.priority != AudioPriority.HIGH_RISK:
                 return False
             self._recent_texts[task.text] = now
+            if len(self._recent_texts) > 64:
+                # Bản gốc không bao giờ dọn từ điển này (rò bộ nhớ khi chạy lâu với nhiều câu khác nhau).
+                self._recent_texts = {t: ts for t, ts in self._recent_texts.items()
+                                      if now - ts < self.dedup_window_sec}
             if (self._current_task is not None
                     and task.priority < self._current_task.priority
                     and self._current_task.interruptible):
@@ -113,6 +120,28 @@ class AudioCoordinator:
                 self._queue.get_nowait()
             except queue.Empty:
                 break
+
+    def play_earcon(self, sound_file: Optional[str]) -> bool:
+        """Âm báo an toàn ngắn, phát song song, không vào hàng đợi và không ngắt lời nói hiện tại."""
+        if not sound_file:
+            return False
+        with self._current_lock:
+            if not self._running:
+                return False
+            play = getattr(self.tts_engine, "play_earcon", None)
+            ok = bool(play(sound_file)) if callable(play) else False
+        listener = self.earcon_listener
+        if ok and listener is not None:
+            try:
+                listener(sound_file, time.monotonic())
+            except Exception as exc:
+                print(f"[AudioCoordinator] Lỗi earcon_listener: {exc}")
+        return ok
+
+    @property
+    def current_priority(self) -> Optional[AudioPriority]:
+        with self._current_lock:
+            return self._current_task.priority if self._current_task is not None else None
 
     def interrupt(self) -> None:
         """Stop playback and invalidate queued AND dequeued tasks atomically."""
@@ -167,8 +196,15 @@ class AudioCoordinator:
                 return
             self._current_entry = entry
             self._current_task = task
+            started_at = time.monotonic()
             if task.sound_file:
                 self.tts_engine.play_sound(task.sound_file)
+        listener = self.playback_listener
+        if listener is not None:
+            try:
+                listener(task, started_at)
+            except Exception as exc:
+                print(f"[AudioCoordinator] Lỗi playback_listener: {exc}")
         if task.sound_file:
             self.tts_engine.wait_until_done(timeout=0.5)
         with self._current_lock:

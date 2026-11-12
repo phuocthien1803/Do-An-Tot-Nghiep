@@ -20,6 +20,11 @@ class PerformanceMetrics:
         }
         self._frame_times: deque = deque(maxlen=window_size)
         self._last_frame_ts = 0.0
+        # Bản cải tiến: đếm chất lượng dữ liệu cặp detection-depth (VALID/DEGRADED/STALE/UNAVAILABLE)
+        self._counts: Dict[str, int] = {}
+
+    def record_count(self, name: str, increment: int = 1) -> None:
+        self._counts[name] = self._counts.get(name, 0) + increment
 
     def record_frame(self) -> None:
         now = time.monotonic()
@@ -52,9 +57,14 @@ class PerformanceMetrics:
         }
 
     def get_summary(self) -> Dict[str, Any]:
-        return {
+        summary = {
             "fps": round(self.get_fps(), 1),
             "detection": self.get_percentiles("detection_ms"),
             "depth": self.get_percentiles("depth_ms"),
             "end_to_end": self.get_percentiles("end_to_end_ms")
         }
+        if self._latencies.get("alert_latency_ms"):
+            summary["alert_latency"] = self.get_percentiles("alert_latency_ms")
+        if self._counts:
+            summary["counts"] = dict(self._counts)
+        return summary

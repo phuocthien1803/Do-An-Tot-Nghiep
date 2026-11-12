@@ -20,7 +20,9 @@ class VQAService:
         backend_name: str = "legacy_caption",
         backend: Optional[VQABackend] = None,
         safety_guardrail: Optional[SafetyGuardrail] = None,
-        mlx_vlm_config: Optional[Dict[str, Any]] = None
+        mlx_vlm_config: Optional[Dict[str, Any]] = None,
+        guardrail_mode: str = "regex",
+        answer_style: str = "goc",
     ):
         # Giữ cấu hình cũ để tương thích consumer hiện tại.
         self.device = device
@@ -28,7 +30,8 @@ class VQAService:
         self.caption_model_name = caption_model_name
         self.translation_model_name = translation_model_name
         self.backend_name = backend_name
-        self.safety_guardrail = safety_guardrail or SafetyGuardrail()
+        self.safety_guardrail = safety_guardrail or SafetyGuardrail(mode=guardrail_mode)
+        self.answer_style = answer_style
 
         if backend is not None:
             self.backend = backend
@@ -87,6 +90,6 @@ class VQAService:
         return VQAResult(
             request_id=request.request_id,
             success=True,
-            answer=format_vqa_answer(backend_text, visual_context),
+            answer=format_vqa_answer(backend_text, visual_context, style=self.answer_style),
             latency_sec=time.monotonic() - started_at
         )

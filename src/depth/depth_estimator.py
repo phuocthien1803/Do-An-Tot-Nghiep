@@ -8,6 +8,7 @@ from PIL import Image
 from src.contracts.frame_packet import FramePacket
 from src.contracts.depth_map import DepthMap, DepthRepresentation
 from src.runtime.model_loading import offline_load_error, pretrained_kwargs
+from src.depth.floor_model import FloorPlaneScaler
 
 class DepthEstimator:
     """
@@ -18,6 +19,12 @@ class DepthEstimator:
     - metric_depth: mét, near_is_larger=False (model Metric-Indoor). Giá trị được nhân
       metric_scale vì thang mét của model lệch theo camera và độ phân giải đầu vào
       (đo trên NYU ở 256px: model ước lượng xa gấp ~1.66 lần) -> cần hiệu chỉnh.
+
+    Lưu ý (bản cải tiến): DPTImageProcessor của Depth Anything V2 có keep_aspect_ratio=True,
+    ensure_multiple_of=14, nên input_size (256, 256) với ảnh 640x480 thực chất cho tensor
+    252x336 (giữ tỉ lệ). Kích thước thật được ghi vào preprocess_transform["model_input_hw"].
+    Khi có floor_scaler, hệ số mét được tự hiệu chỉnh mỗi frame từ mặt sàn (xem floor_model.py);
+    metric_scale chỉ còn là giá trị dự phòng khi chưa khớp được sàn.
     """
 
     def __init__(
@@ -26,7 +33,9 @@ class DepthEstimator:
         device: str = "mps",
         input_size: Tuple[int, int] = (256, 256),
         representation: str = "relative_depth",
-        metric_scale: float = 1.0
+        metric_scale: float = 1.0,
+        floor_scaler: Optional[FloorPlaneScaler] = None,
+        torch_threads: Optional[int] = None
     ):
         self.model_name = model_name
         self.input_size = input_size
@@ -34,6 +43,9 @@ class DepthEstimator:
         if self.representation == DepthRepresentation.INVERSE_DEPTH:
             raise ValueError("DepthEstimator chỉ hỗ trợ relative_depth hoặc metric_depth")
         self.metric_scale = float(metric_scale)
+        self.floor_scaler = floor_scaler if self.representation == DepthRepresentation.METRIC_DEPTH else None
+        if torch_threads:
+            torch.set_num_threads(int(torch_threads))
         if device == "mps" and not torch.backends.mps.is_available():
             print("[DepthEstimator] MPS không khả dụng, chuyển sang CPU.")
             self.device = "cpu"
@@ -96,6 +108,7 @@ class DepthEstimator:
             return_tensors="pt",
             size={"height": self.input_size[0], "width": self.input_size[1]}
         )
+        model_input_hw = tuple(int(x) for x in inputs["pixel_values"].shape[-2:])
         inputs = {k: v.to(self.device) for k, v in inputs.items()}
 
         with torch.no_grad():
@@ -114,9 +127,16 @@ class DepthEstimator:
 
         # Kiểm tra valid mask (loại trừ NaN, Inf)
         valid_mask = np.isfinite(depth_np) & (~np.isnan(depth_np))
+        floor_info = None
+        applied_scale = self.metric_scale
         if is_metric:
-            depth_np = depth_np * self.metric_scale
             valid_mask &= depth_np > 0.0
+            if self.floor_scaler is not None:
+                # Tự hiệu chỉnh hệ số mét theo mặt sàn; kèm đường sàn kỳ vọng cho floor_hazards.
+                depth_np, floor_info = self.floor_scaler.apply(depth_np, valid_mask)
+                applied_scale = floor_info["applied_scale"]
+            else:
+                depth_np = depth_np * applied_scale
 
         return DepthMap(
             representation=self.representation,
@@ -130,6 +150,8 @@ class DepthEstimator:
             preprocess_transform={
                 "original_size": (w_orig, h_orig),
                 "model_name": self.model_name,
-                "metric_scale": self.metric_scale if is_metric else None
+                "metric_scale": applied_scale if is_metric else None,
+                "model_input_hw": model_input_hw,
+                "floor": floor_info,
             }
         )

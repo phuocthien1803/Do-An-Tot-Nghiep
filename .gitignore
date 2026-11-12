@@ -62,3 +62,7 @@ artifacts/
 
 # Local model downloads (prepared explicitly by scripts/download_models.py)
 /models/weights/
+
+# Ban cai tien: du lieu thuc nghiem va ket qua cuc bo
+/data/
+/ket_qua/

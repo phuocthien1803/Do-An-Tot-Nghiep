@@ -17,6 +17,7 @@ COLOR_MED_RISK = (30, 180, 255)      # Amber cảnh báo chú ý
 COLOR_LOW_RISK = (180, 190, 60)      # Teal nguy cơ thấp (không dùng "AN TOAN")
 COLOR_ONLINE = (60, 220, 80)         # Xanh lá trạng thái camera online
 COLOR_WHITE = (255, 255, 255)
+COLOR_UNKNOWN = (150, 150, 150)      # Xám: chưa xác định (dữ liệu chưa hợp lệ)
 COLOR_BG = (20, 16, 14)              # Nền letterbox
 
 # Bảng chuyển đổi ký tự tiếng Việt có dấu sang ASCII an toàn cho OpenCV Hershey font
@@ -48,6 +49,13 @@ _VI_ASCII_TRANS = str.maketrans({
     "Ỳ": "Y", "Ý": "Y", "Ỷ": "Y", "Ỹ": "Y", "Ỵ": "Y",
     "Đ": "D"
 })
+
+
+class _RegionBox:
+    """Bọc vùng ảnh của nguy cơ không có detection để vẽ như một bbox."""
+
+    def __init__(self, bbox):
+        self.bbox = bbox
 
 
 class HUDRenderer:
@@ -257,6 +265,15 @@ class HUDRenderer:
             pill_color = COLOR_CYAN if mode_str != "DEGRADED" else COLOR_HIGH_RISK
         next_x = self._draw_status_pill(canvas, 140, 8, pill_text, color=pill_color, font_scale=0.36)
 
+        if selected in ("OCR", "VQA") and snapshot.get("safety_beeps_enabled") and width >= 600:
+            next_x = self._draw_status_pill(canvas, next_x + 10, 8, "BIP AN TOAN", color=COLOR_HIGH_RISK, font_scale=0.36)
+        floor = snapshot.get("floor") or {}
+        if floor and width >= 720:
+            floor_text = f"SAN k={floor.get('applied_scale', 0):.2f}" if floor.get("calibrated") else "SAN --"
+            next_x = self._draw_status_pill(canvas, next_x + 10, 8, floor_text,
+                                            color=COLOR_ONLINE if floor.get("valid") else COLOR_TEXT_MUTED,
+                                            font_scale=0.36)
+
         if snapshot.get("is_speaking", False) and width >= 600:
             next_x = self._draw_status_pill(canvas, next_x + 10, 8, "DANG NOI", color=(100, 235, 255), font_scale=0.36)
 
@@ -322,6 +339,9 @@ class HUDRenderer:
             if not isinstance(a, RiskAssessment):
                 continue
             d = det_map.get(a.track_id)
+            region = getattr(a, "region", None)
+            if (d is None or not hasattr(d, "bbox")) and region is not None:
+                d = _RegionBox(region)  # vật cản chung / bậc xuống / vật thấp: không có bbox YOLO
             if d is None or not hasattr(d, "bbox"):
                 continue
 
@@ -349,10 +369,19 @@ class HUDRenderer:
                 color = COLOR_MED_RISK
                 thickness = 2
                 level_str = "TRUNG BINH"
-            else:
+            elif a.risk_level == RiskLevel.LOW:
                 color = COLOR_LOW_RISK
                 thickness = 1
                 level_str = "NGUY CO THAP"
+            elif a.risk_level == RiskLevel.NO_ALERT:
+                # Bản gốc gộp NO_ALERT/UNDETERMINED vào nhãn "NGUY CO THAP" (sai nghĩa).
+                color = COLOR_LOW_RISK
+                thickness = 1
+                level_str = "KHONG CANH BAO"
+            else:
+                color = COLOR_UNKNOWN
+                thickness = 1
+                level_str = "CHUA XAC DINH"
 
             # Vẽ khung chữ nhật nhận diện
             cv2.rectangle(canvas, (bx1, by1), (bx2, by2), color, thickness, cv2.LINE_AA)
@@ -377,6 +406,9 @@ class HUDRenderer:
             obj_name = self._clean_ascii(a.class_name).upper()
             prox_str = self._clean_ascii(a.proximity_desc)
             label_text = f"{obj_name} | {level_str} - {prox_str}"
+            ttc = getattr(a, "ttc_sec", None)
+            if ttc is not None:
+                label_text += f" | TTC {ttc:.1f}s"
 
             font_scale = 0.40
             (tw, th), _ = cv2.getTextSize(label_text, cv2.FONT_HERSHEY_SIMPLEX, font_scale, 1)
@@ -507,10 +539,12 @@ class HUDRenderer:
         self._draw_translucent_panel(canvas, 0, y1, width, height, bg_color=COLOR_PANEL_BG, border_color=COLOR_PANEL_BORDER, alpha=0.88, border_thickness=1)
 
         shortcuts = [
-            ("Q", "Hoi canh vat"),
+            ("Q", "Hoi"),
+            ("V", "Giong noi"),
             ("SPACE", "Doc chu"),
             ("C", "Canh bao"),
-            ("S", "Dung doc"),
+            ("S", "Dung"),
+            ("H", "Tro giup"),
             ("ESC", "Thoat")
         ]
         if width < 720:

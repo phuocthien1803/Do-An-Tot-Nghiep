@@ -56,6 +56,25 @@ class BoundedBuffer(Generic[T]):
                 return self._deque.popleft()
             return None
 
+    def get_newest(self, timeout: Optional[float] = None) -> Optional[T]:
+        """Đợi tối đa timeout giây rồi lấy phần tử MỚI NHẤT, loại các phần tử cũ hơn.
+
+        Bản cải tiến: worker dùng hàm này thay cho get() (FIFO) để không bao giờ xử lý frame cũ
+        khi có frame mới hơn đang chờ (vẫn giữ nguyên cơ chế drop-oldest của put()).
+        """
+        with self._not_empty:
+            if not self._deque:
+                if timeout is not None and timeout <= 0:
+                    return None
+                if not self._not_empty.wait(timeout):
+                    return None
+            if not self._deque:
+                return None
+            latest = self._deque.pop()
+            self._dropped_count += len(self._deque)
+            self._deque.clear()
+            return latest
+
     def get_latest(self, clear_older: bool = True) -> Optional[T]:
         """
         Lấy trực tiếp phần tử mới nhất hiện có trong bộ đệm.

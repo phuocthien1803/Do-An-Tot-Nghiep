@@ -144,12 +144,58 @@ def setup_mlx_vlm_weights():
     print(f"[OK] MLX-VLM đã lưu tại: {target}")
 
 
+def setup_yolov8s_weights():
+    """[Cải tiến] YOLOv8s cho bản Mac (ban_mac/cau_hinh_mac.yaml)."""
+    target = os.path.join(WEIGHTS_DIR, "yolov8s.pt")
+    if os.path.exists(target):
+        print(f"[OK] YOLOv8s đã có tại: {target}")
+        return
+    os.makedirs(WEIGHTS_DIR, exist_ok=True)
+    from ultralytics import YOLO
+    YOLO("yolov8s.pt")
+    if os.path.exists("yolov8s.pt"):
+        shutil.move("yolov8s.pt", target)
+    print(f"[OK] Đã tải YOLOv8s tại: {target}")
+
+
+def setup_asr_weights(model_size: str = "small"):
+    """[Cải tiến] faster-whisper cho hỏi bằng giọng nói (phím V). Cần pip install faster-whisper."""
+    from faster_whisper import WhisperModel
+    target = os.path.join(WEIGHTS_DIR, f"faster_whisper_{model_size}")
+    WhisperModel(model_size, device="cpu", compute_type="int8", download_root=target)
+    # WhisperModel lưu theo cấu trúc cache của huggingface_hub; tìm thư mục chứa model.bin.
+    for dirpath, _, files in os.walk(target):
+        if "model.bin" in files:
+            link = os.path.join(WEIGHTS_DIR, f"faster_whisper_{model_size}_model")
+            if os.path.abspath(dirpath) != os.path.abspath(link):
+                if os.path.exists(link):
+                    shutil.rmtree(link)
+                shutil.copytree(dirpath, link)
+            print(f"[OK] faster-whisper '{model_size}' đã sẵn sàng tại: {link}")
+            print(f"     Đặt asr.model_path: \"models/weights/faster_whisper_{model_size}_model\"")
+            return
+    print("[FAIL] Không tìm thấy model.bin sau khi tải faster-whisper.")
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--mlx-vlm", action="store_true",
                         help="Chỉ tải model MLX-VLM cấu hình trong model_config.yaml")
+    parser.add_argument("--yolov8s", action="store_true", help="[Cải tiến] Chỉ tải YOLOv8s (bản Mac)")
+    parser.add_argument("--asr", nargs="?", const="small", default=None,
+                        help="[Cải tiến] Chỉ tải faster-whisper (mặc định 'small') cho phím V")
     args = parser.parse_args(argv)
     enable_model_downloads()
+    if args.yolov8s or args.asr:
+        try:
+            if args.yolov8s:
+                setup_yolov8s_weights()
+            if args.asr:
+                setup_asr_weights(args.asr)
+        except Exception as exc:
+            print(f"[FAIL] {exc}", file=sys.stderr)
+            return 1
+        return 0
     if args.mlx_vlm:
         try:
             setup_mlx_vlm_weights()

@@ -1,37 +1,28 @@
 #!/usr/bin/env python3
 """
-Đánh giá pipeline trên video thực nghiệm hoặc video clip kiểm thử.
-Tuân thủ mục 9.3 của Kế hoạch:
-- Hỗ trợ replay thời gian thực và offline quality.
-- Báo cáo số đối tượng phát hiện, số cảnh báo kích hoạt, FPS thực tế và latencies.
+Đánh giá pipeline trên video thực nghiệm hoặc video clip kiểm thử (chạy THỜI GIAN THỰC qua
+SystemCoordinator, đúng như app). Bản cải tiến dựng thành phần bằng src/runtime/factory.py và nhận
+--overlay để so sánh biến thể; giọng đọc mặc định "console" (in ra màn hình) để chạy được trên CI.
+Đánh giá theo sự kiện trên video có nhãn: dùng scripts/danh_gia_su_kien.py.
 """
 
 import argparse
+import json
 import os
 import sys
 import time
-import json
-import numpy as np
-import yaml
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from src.camera.camera_manager import CameraManager
-from src.detection.class_filter import ClassFilter
-from src.detection.yolo_detector import YoloDetector
-from src.tracking.byte_tracker import ByteTrackerAdapter
-from src.depth.factory import build_depth_estimator, build_roi_extractor
-from src.fusion.walking_corridor import WalkingCorridor
-from src.fusion.generic_obstacle import build_generic_obstacle_detector
-from src.fusion.spatial_zones import SpatialZones
-from src.fusion.synchronizer import Synchronizer
-from src.fusion.risk_fsm import RiskFSM
-from src.fusion.alert_aggregator import AlertAggregator
-from src.audio.tts_engine import TTSEngine
-from src.audio.audio_coordinator import AudioCoordinator
-from src.runtime.system_coordinator import SystemCoordinator
+from src.audio.audio_coordinator import AudioCoordinator  # noqa: E402
+from src.audio.tts_factory import create_tts_engine  # noqa: E402
+from src.camera.camera_manager import CameraManager  # noqa: E402
+from src.runtime import factory  # noqa: E402
+from src.runtime.config import load_configs  # noqa: E402
+from src.runtime.system_coordinator import SystemCoordinator  # noqa: E402
+
 
 def main():
     parser = argparse.ArgumentParser(description="Đánh giá pipeline trên video")
@@ -40,93 +31,31 @@ def main():
     parser.add_argument("--device", type=str, default="mps")
     parser.add_argument("--out", type=str, default="evaluation/results/eval_report.json")
     parser.add_argument("--weights", type=str, default=None, help="Ghi đè detection.weights_path")
+    parser.add_argument("--overlay", action="append", default=[], help="Lớp phủ cấu hình (lặp lại được)")
+    parser.add_argument("--platform", default="none", choices=["none", "mac", "windows", "auto"])
+    parser.add_argument("--tts", default="console", help="console | say | sapi")
     args = parser.parse_args()
 
     print(f"[EVALUATION] Bắt đầu chạy đánh giá trên nguồn '{args.video}' trong {args.duration}s...")
-
-    def load_cfg(name):
-        path = os.path.join(PROJECT_ROOT, "configs", name)
-        if not os.path.exists(path):
-            return {}
-        with open(path, "r", encoding="utf-8") as f:
-            return yaml.safe_load(f) or {}
-
-    fusion_cfg = load_cfg("fusion_rules.yaml")
-    model_cfg = load_cfg("model_config.yaml")
-    det_cfg = model_cfg.get("detection", {})
-
-    sync_cfg = fusion_cfg.get("synchronizer", {})
-    max_pair_skew_ms = float(sync_cfg.get("max_pair_skew_ms", 600.0))
-    max_detection_age_ms = float(sync_cfg.get("max_detection_age_ms", 1000.0))
-    max_depth_age_ms = float(sync_cfg.get("max_depth_age_ms", 1200.0))
-    max_alert_age_ms = float(sync_cfg.get("max_alert_age_ms", 1500.0))
-
-    walking_corridor = WalkingCorridor(**fusion_cfg.get("walking_corridor", {}))
-    spatial_cfg = fusion_cfg.get("spatial", {})
-    spatial_zones = SpatialZones(
-        left_ratio=spatial_cfg.get("left_ratio", 0.35),
-        center_ratio=spatial_cfg.get("center_ratio", 0.30),
-        right_ratio=spatial_cfg.get("right_ratio", 0.35)
-    )
-
+    os.chdir(PROJECT_ROOT)
+    cfg = load_configs(PROJECT_ROOT, platform=args.platform, overlays=args.overlay)
     camera = CameraManager(source=args.video, target_fps=30.0)
-    class_filter = ClassFilter(
-        enabled_classes=det_cfg.get("enabled_classes"),
-        alert_classes=det_cfg.get("alert_classes"),
-        custom_vi_names=fusion_cfg.get("labels_vi")
-    )
-    detector = YoloDetector(
-        weights_path=args.weights or det_cfg.get("weights_path", "models/weights/yolov8n.pt"),
-        device=args.device,
-        class_filter=class_filter,
-        confidence_threshold=det_cfg.get("confidence_threshold", 0.45)
-    )
-    tracker = ByteTrackerAdapter()
-    depth_estimator = build_depth_estimator(model_cfg, args.device)
-    roi_extractor = build_roi_extractor(model_cfg, fusion_cfg)
-    synchronizer = Synchronizer(
-        max_pair_skew_ms=max_pair_skew_ms,
-        max_detection_age_ms=max_detection_age_ms,
-        max_depth_age_ms=max_depth_age_ms,
-        max_alert_age_ms=max_alert_age_ms
-    )
-    fsm_cfg = fusion_cfg.get("risk_fsm", {})
-    risk_fsm = RiskFSM(
-        class_filter=class_filter,
-        spatial_zones=spatial_zones,
-        walking_corridor=walking_corridor,
-        roi_extractor=roi_extractor,
-        depth_threshold_high=float(fsm_cfg.get("depth_threshold_high", 0.75)),
-        depth_threshold_medium=float(fsm_cfg.get("depth_threshold_medium", 0.45)),
-        depth_threshold_low=float(fsm_cfg.get("depth_threshold_low", 0.25)),
-        confirmations_to_escalate=int(fsm_cfg.get("confirmations_to_escalate", 2)),
-        confirmations_to_deescalate=int(fsm_cfg.get("confirmations_to_deescalate", 3)),
-        instant_high_risk_in_center=bool(fsm_cfg.get("instant_high_risk_in_center", True)),
-        cooldown_sec=float(fsm_cfg.get("track_alert_cooldown_sec", 4.0)),
-        allow_escalation_override=bool(fsm_cfg.get("allow_escalation_override", True)),
-        generic_obstacle_detector=build_generic_obstacle_detector(fusion_cfg, walking_corridor)
-    )
-    agg_cfg = fusion_cfg.get("alert_aggregator", {})
-    alert_aggregator = AlertAggregator(
-        risk_fsm=risk_fsm,
-        alert_lifetime_sec=float(agg_cfg.get("alert_lifetime_sec", fsm_cfg.get("alert_lifetime_sec", 3.0))),
-        global_alert_interval_sec=float(agg_cfg.get("global_alert_interval_sec", 3.5)),
-        max_detection_age_ms=max_detection_age_ms,
-        max_depth_age_ms=max_depth_age_ms,
-        max_alert_age_ms=max_alert_age_ms
-    )
-    tts_engine = TTSEngine()
-    audio_coordinator = AudioCoordinator(tts_engine=tts_engine)
+    stack = factory.build_risk_stack(cfg)
+    detector = factory.build_detector(cfg, args.device, stack["class_filter"], args.weights)
+    depth_estimator = factory.build_depth(cfg, args.device)
+    audio_cfg = dict(cfg["app"].get("audio", {}), engine=args.tts)
+    audio_coordinator = AudioCoordinator(tts_engine=create_tts_engine(audio_cfg))
 
     coordinator = SystemCoordinator(
         camera_manager=camera,
         detector=detector,
-        tracker=tracker,
+        tracker=stack["tracker"],
         depth_estimator=depth_estimator,
-        synchronizer=synchronizer,
-        risk_fsm=risk_fsm,
-        alert_aggregator=alert_aggregator,
-        audio_coordinator=audio_coordinator
+        synchronizer=stack["synchronizer"],
+        risk_fsm=stack["risk_fsm"],
+        alert_aggregator=stack["aggregator"],
+        audio_coordinator=audio_coordinator,
+        startup_grace_max_sec=cfg["app"].get("runtime", {}).get("startup_grace_max_sec"),
     )
 
     coordinator.start()
@@ -142,13 +71,13 @@ def main():
     finally:
         coordinator.stop()
 
-    summary = coordinator.metrics.get_summary()
     report = {
         "video_source": args.video,
         "evaluation_duration_sec": args.duration,
+        "overlays": [os.path.basename(p) for p in cfg["_meta"]["overlays"]],
         "total_camera_frames": camera.frame_count,
         "total_frames_processed": total_frames_processed,
-        "performance_metrics": summary
+        "performance_metrics": coordinator.metrics.get_summary()
     }
 
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
@@ -157,6 +86,7 @@ def main():
 
     print(f"\n[EVALUATION] Hoàn tất đánh giá. Báo cáo đã lưu tại: {args.out}")
     print(json.dumps(report, indent=2, ensure_ascii=False))
+
 
 if __name__ == "__main__":
     main()

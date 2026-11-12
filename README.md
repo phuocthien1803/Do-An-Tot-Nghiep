@@ -1,3 +1,8 @@
+> **BẢN CẢI TIẾN** — thư mục này là bản cải tiến của dự án gốc (GitHub b020e38, tag `ban-goc`).
+> Xem [`BAO_CAO_CAI_TIEN.md`](BAO_CAO_CAI_TIEN.md) để biết đã sửa gì và cách so sánh với bản gốc;
+> chạy trên Windows: [`ban_windows/HUONG_DAN_WINDOWS.md`](ban_windows/HUONG_DAN_WINDOWS.md), trên Mac: [`ban_mac/HUONG_DAN_MAC.md`](ban_mac/HUONG_DAN_MAC.md).
+> Phần dưới đây là README của bản gốc, giữ nguyên để đối chiếu.
+
 # Hệ thống AI đa phương thức hỗ trợ người khiếm thị
 
 [![CI](https://github.com/lqmnhat13/Do-An-Tot-Nghiep/actions/workflows/cicd.yml/badge.svg)](https://github.com/lqmnhat13/Do-An-Tot-Nghiep/actions/workflows/cicd.yml)

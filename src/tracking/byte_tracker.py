@@ -33,8 +33,9 @@ def compute_iou(boxA: BoundingBox, boxB: BoundingBox) -> float:
 
 class ByteTrackerAdapter:
     """
-    Adapter theo vết đối tượng (Object Tracker) theo cơ chế liên kết dữ liệu IoU hai tầng.
-    Duy trì định danh track_id liên tục qua các frame để phục vụ FSM đánh giá rủi ro.
+    Bộ theo vết của BẢN GỐC: ghép IoU một tầng, tham lam theo thứ tự detection, cùng lớp.
+    (Docstring gốc ghi "hai tầng" nhưng mã chỉ có một tầng.) Giữ lại để chạy so sánh
+    (tracking.type: iou); bản cải tiến mặc định dùng src/tracking/bytetrack.py.
     """
 
     def __init__(self, iou_threshold: float = 0.3, max_lost_frames: int = 5):

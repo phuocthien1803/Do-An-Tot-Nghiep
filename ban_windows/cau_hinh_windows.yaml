@@ -1,0 +1,38 @@
+# ======================================================================
+#  BẢN WINDOWS (laptop Intel CPU, không GPU) - lớp phủ cấu hình nền tảng
+#  Tự áp dụng khi chạy trên Windows (python app.py) hoặc ép bằng --platform windows.
+#  Đây là máy THỬ NGHIỆM: độ trễ cao hơn Mac nhiều, không dùng số liệu tốc độ ở đây cho báo cáo
+#  hiệu năng trên thiết bị mục tiêu.
+# ======================================================================
+mo_ta: "Bản Windows: CPU + giọng SAPI (Microsoft An) + EasyOCR + BLIP caption"
+
+app_config:
+  app:
+    device: "cpu"
+  camera:
+    source: 1          # máy test: 1 = webcam tích hợp, 0 = camera ảo Camo. Đổi bằng --source.
+  audio:
+    engine: "sapi"     # ban_windows/windows_tts.py + sapi_tts.vbs
+    voice: "Linh"      # tên giọng macOS -> script tự chọn giọng tiếng Việt OneCore
+  runtime:
+    torch_threads: 4   # i5-1135G7: 4 nhân; tránh hai luồng detection/depth giành nhau 8 luồng
+    startup_grace_max_sec: 45.0
+
+model_config:
+  detection:
+    device: "cpu"
+    input_size: 480    # nhỏ hơn 640 để detection CPU nhanh hơn (~1,8 lần ít điểm ảnh)
+  depth:
+    device: "cpu"
+    # 182 -> tensor thực tế 182x238 (giữ tỉ lệ). Đo trên i5-1135G7 (4 luồng): 182 ~213 ms,
+    # 196 ~267 ms, 224 ~335 ms (riêng depth; trong app chậm hơn ~25% do chạy song song detection).
+    # Ở 224, ~30% cặp detection-depth vượt giới hạn lệch 600 ms -> DEGRADED -> không cảnh báo.
+    # 182 giữ độ lệch < 600 ms; đổi lại bản đồ độ sâu thô hơn (máy test, không phải máy mục tiêu).
+    input_height: 182
+    input_width: 182
+  ocr:
+    engine: "easyocr"
+    device: "cpu"
+  vqa:
+    backend: "legacy_caption"  # BLIP + MarianMT; chưa có trong cache thì dùng ngữ cảnh detection
+    device: "cpu"

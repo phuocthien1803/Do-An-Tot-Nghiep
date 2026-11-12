@@ -29,9 +29,9 @@ digraph assistive_flow {
     style="rounded";
     penwidth=1.5;
     detection [label="YOLOv8n\nDetection + tracking", fillcolor="#dff1ee", color="#4b9a87"];
-    depth [label="Depth Anything V2\nĐộ gần tương đối", fillcolor="#dff1ee", color="#4b9a87"];
+    depth [label="Depth Anything V2\nĐộ sâu metric (mét)\n+ tự hiệu chỉnh theo sàn", fillcolor="#dff1ee", color="#4b9a87"];
     sync [label="Đồng bộ + kiểm tra\nđộ mới dữ liệu", fillcolor="#f8f1d9", color="#c5a64d"];
-    risk [label="Risk FSM +\nAlert Aggregator", fillcolor="#f8e8df", color="#cf805f"];
+    risk [label="Hành lang + Risk FSM (TTC)\n+ bậc xuống/vật thấp\n+ Alert Aggregator", fillcolor="#f8e8df", color="#cf805f"];
   }
 
   subgraph cluster_on_demand {
@@ -48,7 +48,7 @@ digraph assistive_flow {
     vqa [label="MLX-VLM\nGuardrail an toàn", fillcolor="#e6eff8", color="#7398b4"];
   }
 
-  audio [label="Audio Coordinator\nTTS tiếng Việt", fillcolor="#f9e1e3", color="#c46b75"];
+  audio [label="Audio Coordinator\nTTS tiếng Việt\n+ âm báo lập thể/bíp an toàn", fillcolor="#f9e1e3", color="#c46b75"];
   hud [label="HUD / trạng thái", fillcolor="#edf0f2", color="#8797a2"];
 
   camera -> buffers;

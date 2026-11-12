@@ -1,0 +1,4 @@
+# Thư viện TUỲ CHỌN của bản cải tiến - thiếu thì tính năng tương ứng tự tắt và báo bằng giọng nói.
+sounddevice>=0.4      # ghi âm micro cho hỏi bằng giọng nói (phím V)
+faster-whisper>=1.0   # nhận dạng giọng nói offline (CTranslate2, chạy CPU)
+pynput>=1.7           # phím tắt toàn hệ thống (ui.global_hotkeys: true)
