@@ -77,6 +77,15 @@ def build_voice_input(app_cfg: dict):
     )
 
 
+def build_object_finder(app_cfg: dict, earcons, audio_coordinator, stack, model_cfg: dict):
+    find_cfg = app_cfg.get("find", {}) or {}
+    if not find_cfg.get("enabled", False) or earcons is None:
+        return None
+    from src.fusion.object_finder import ObjectFinder
+    return ObjectFinder(audio_coordinator, earcons, roi_extractor=stack["roi"],
+                        enabled_classes=model_cfg.get("detection", {}).get("enabled_classes"))
+
+
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description="Hệ thống AI đa phương thức hỗ trợ người khiếm thị (bản cải tiến)")
     parser.add_argument("--source", type=str, default=None, help="Nguồn camera: 0 (webcam), đường dẫn tệp video, hoặc 'dummy'")
@@ -158,6 +167,7 @@ def main(argv=None):
         auto_return_warning_sec=float(app_cfg.get("ui", {}).get("auto_return_warning_sec", 0.0)),
         startup_grace_max_sec=runtime_cfg.get("startup_grace_max_sec"),
         min_frame_brightness=float(runtime_cfg.get("min_frame_brightness", 0.0) or 0.0),
+        object_finder=build_object_finder(app_cfg, earcons, audio_coordinator, stack, model_cfg),
     )
 
     hud_renderer = HUDRenderer(
@@ -174,6 +184,7 @@ def main(argv=None):
         duration_sec=args.duration,
         headless_keyboard=bool(ui_cfg.get("headless_keyboard", False)),
         global_hotkeys=bool(ui_cfg.get("global_hotkeys", False)),
+        one_button=ui_cfg.get("one_button"),
     )
     try:
         runner.run()

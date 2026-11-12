@@ -57,6 +57,8 @@ Mọi tham số của `app.py` đều truyền được qua các tệp `.bat`, v
 | V | hỏi bằng giọng nói |
 | C | về chế độ cảnh báo |
 | S | dừng đọc và tạm im tiếng bíp |
+| F | tìm đồ (bấm tiếp để đổi món: cốc, chai, ghế, người, bàn…) |
+| B / Enter / nút Bluetooth | **nút một phím**: 1 lần = hỏi, 2 lần = đọc chữ, 3 lần = tìm đồ, giữ lâu = im lặng/về cảnh báo |
 | H | nghe hướng dẫn |
 | I | nghe trạng thái hệ thống |
 | Esc | thoát |
@@ -81,3 +83,22 @@ Muốn bấm phím được kể cả khi cửa sổ không được chọn, đ�
   Muốn so sánh với kết quả của máy Mac thì dùng `--platform none` ở cả hai máy, để cùng kích thước suy luận.
 - Test `test_runtime_modes...test_return_requires_new_sources_and_valid_quality` đôi khi lỗi trên
   Windows vì đồng hồ `time.monotonic()` chỉ có độ phân giải khoảng 15,6 ms. Đây là lỗi có sẵn ở bản gốc.
+
+## Dành cho người khiếm thị: một nút bấm
+
+Người dùng không nhìn thấy bàn phím. Dùng **nút chụp ảnh Bluetooth** (khoảng 50–100 nghìn đồng,
+loại "AB Shutter") ghép đôi với máy, cầm một tay, tay kia cầm gậy:
+
+- Bấm 1 lần: hỏi "Phía trước có gì?"
+- Bấm 2 lần: đọc chữ
+- Bấm 3 lần: tìm đồ (mỗi lần bấm 3 lần đổi sang món tiếp theo)
+- Giữ lâu: im lặng; nếu đang im thì về chế độ cảnh báo
+
+Nút Bluetooth gửi phím "tăng âm lượng", nên cần `ui.global_hotkeys: true` và thư viện `pynput`
+(cài bằng script cài đặt tuỳ chọn). Thử trên bàn phím bằng phím **B**.
+
+Kiểm thử tự động từng phím, kèm ảnh minh chứng:
+
+```
+python scripts/kiem_thu_phim.py
+```

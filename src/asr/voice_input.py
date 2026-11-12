@@ -25,7 +25,7 @@ def _norm(text: str) -> str:
 
 
 def route_voice_command(text: str) -> Tuple[str, str]:
-    """Trả về (lệnh, câu hỏi): lệnh thuộc ocr | help | status | warning | vqa | empty."""
+    """Trả về (lệnh, câu hỏi): lệnh thuộc ocr | find | help | status | warning | vqa | empty."""
     t = _norm(text).strip(" .?!,")
     if not t:
         return "empty", ""
@@ -35,6 +35,8 @@ def route_voice_command(text: str) -> Tuple[str, str]:
         return "status", t
     if re.search(r"\b(?:chế độ cảnh báo|quay lại cảnh báo|về cảnh báo|bật cảnh báo)\b", t):
         return "warning", t
+    if re.search(r"\btìm\b", t):
+        return "find", t
     if re.search(r"\bđọc\b", t) and re.search(
             r"\b(?:chữ|biển|bảng|giấy|nhãn|văn bản|thông báo|hoá đơn|hóa đơn|thực đơn|tài liệu)\b", t):
         return "ocr", t

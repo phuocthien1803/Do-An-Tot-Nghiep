@@ -1,6 +1,7 @@
 import threading
 import time
 from typing import Optional, Dict, Any, List
+import cv2
 import numpy as np
 
 from src.contracts.frame_packet import FramePacket
@@ -27,6 +28,7 @@ from src.audio.audio_coordinator import AudioCoordinator
 from src.audio.earcons import EarconLibrary
 from src.audio.safety_channel import SafetySoundChannel
 from src.asr.voice_input import route_voice_command
+from src.fusion.object_finder import resolve_target
 from src.runtime.event_log import EventLog, NULL_LOG
 from src.runtime.metrics import PerformanceMetrics
 from src.runtime.watchdog import Watchdog
@@ -80,12 +82,17 @@ class SystemCoordinator:
     DARK_ANNOUNCE_AFTER_SEC = 2.0
     RECOVERED_WARNING = "Cảnh báo vật cản đã hoạt động trở lại."
     RECOVERED_OTHER = "Hệ thống đã hoạt động trở lại."
-    MODE_NAMES_VI = {"WARNING": "chế độ cảnh báo", "OCR": "chế độ đọc chữ", "VQA": "chế độ hỏi đáp"}
+    MODE_NAMES_VI = {"WARNING": "chế độ cảnh báo", "OCR": "chế độ đọc chữ", "VQA": "chế độ hỏi đáp",
+                     "FIND": "chế độ tìm đồ"}
+    WALKING_MODES = ("WARNING", "FIND")  # chế độ người dùng đang di chuyển: lời cảnh báo vẫn bật
     BUSY_TEXT = "Đang xử lý yêu cầu trước, vui lòng chờ."
     HELP_TEXT = (
         "Phím cách: đọc chữ. Phím Q: hỏi phía trước có gì. Phím V: hỏi bằng giọng nói. "
         "Phím C: về chế độ cảnh báo. Phím S: dừng đọc và tạm im tiếng bíp. "
-        "Phím I: nghe trạng thái hệ thống. Phím H: nghe lại hướng dẫn. Phím Escape: thoát."
+        "Phím F: tìm đồ, bấm tiếp để đổi món. "
+        "Phím I: nghe trạng thái hệ thống. Phím H: nghe lại hướng dẫn. Phím Escape: thoát. "
+        "Nếu dùng nút bấm cầm tay: bấm một lần để hỏi, hai lần để đọc chữ, ba lần để tìm đồ, "
+        "giữ lâu để im lặng hoặc về chế độ cảnh báo."
     )
     AUTO_RETURN_TEXT = "Đã tự động quay lại chế độ cảnh báo."
 
@@ -110,6 +117,7 @@ class SystemCoordinator:
         auto_return_warning_sec: float = 0.0,
         startup_grace_max_sec: Optional[float] = None,
         min_frame_brightness: float = 0.0,
+        object_finder=None,
     ):
         if on_demand_high_alert not in ON_DEMAND_HIGH_ALERT_MODES:
             raise ValueError(f"on_demand_high_alert phải thuộc {ON_DEMAND_HIGH_ALERT_MODES}")
@@ -133,6 +141,8 @@ class SystemCoordinator:
         # Bản cải tiến: ảnh quá tối/ống kính bị che -> độ sâu vô nghĩa; bản gốc vẫn coi là VALID
         # và có thể báo "vật cản" giả hoặc im lặng sai. 0 = tắt (như bản gốc).
         self.min_frame_brightness = float(min_frame_brightness or 0.0)
+        self.object_finder = object_finder
+        self._find_intro_done = False
         self._dark_since: Optional[float] = None
 
         self.metrics = PerformanceMetrics()
@@ -220,7 +230,7 @@ class SystemCoordinator:
             return self._on_demand_active
 
     def _alerts_spoken_in(self, mode: str) -> bool:
-        return mode == "WARNING" or self.on_demand_high_alert == "speech"
+        return mode in self.WALKING_MODES or self.on_demand_high_alert == "speech"
 
     def _select_mode_locked(self, mode: str) -> None:
         changed = self._selected_mode != mode
@@ -228,7 +238,13 @@ class SystemCoordinator:
         self._current_mode = "OBSERVATION" if mode == "WARNING" else mode
         self.audio_coordinator.interrupt()
         self.audio_coordinator.set_safety_alerts_enabled(self._alerts_spoken_in(mode))
-        if changed:
+        if mode != "FIND" and self.object_finder is not None:
+            self.object_finder.stop()
+        if mode == "FIND":
+            self._warning_since = time.monotonic()  # lời giới thiệu do start_find phát
+            if changed:
+                self.event_log.write("mode", mode=mode)
+        elif changed:
             if mode == "WARNING":
                 self._warning_since = time.monotonic()
                 text = "Đã chuyển sang chế độ cảnh báo."
@@ -420,6 +436,8 @@ class SystemCoordinator:
         self._running = False
         if self.safety_channel is not None:
             self.safety_channel.stop()
+        if self.object_finder is not None:
+            self.object_finder.shutdown()
         self.camera_manager.stop()
         if self._det_thread and self._det_thread.is_alive():
             self._det_thread.join(timeout=1.5)
@@ -506,7 +524,7 @@ class SystemCoordinator:
         with self._state_lock:
             if self._shutting_down:
                 return problem
-            warning = self._selected_mode == "WARNING"
+            warning = self._selected_mode in self.WALKING_MODES
             self._health_problem = problem
             if problem is not None and warning:
                 self._current_mode = "DEGRADED"
@@ -632,6 +650,8 @@ class SystemCoordinator:
 
                 # 5. Lời cảnh báo chỉ ở chế độ Cảnh báo; kênh bíp an toàn theo cấu hình.
                 self._post_safety_alert(assessments)
+                if self.object_finder is not None:
+                    self.object_finder.update(sync_pair)
 
                 e2e_ms = (time.monotonic() - t0) * 1000.0
                 self.metrics.record_latency("end_to_end_ms", e2e_ms)
@@ -653,12 +673,37 @@ class SystemCoordinator:
             except Exception as e:
                 print(f"[DetectionWorker] Lỗi suy luận và fusion: {e}")
 
+    @staticmethod
+    def is_blind_frame(image: np.ndarray, min_brightness: float = 15.0,
+                       flat_cell_std: float = 8.0, flat_ratio: float = 0.85,
+                       max_laplacian_var: float = 25.0) -> bool:
+        """Camera "mù": ảnh quá tối, HOẶC ảnh gần như phẳng không chi tiết (tay/vật che sát ống kính).
+
+        Che tay lên webcam thường KHÔNG làm ảnh tối hẳn vì camera tự tăng phơi sáng (ảnh xám/đỏ
+        nhoè, độ sáng 20-80). Dấu hiệu chắc hơn là mất chi tiết: hầu hết ô lưới 4x4 có độ lệch chuẩn
+        rất nhỏ và độ nét Laplacian thấp. Cảnh thật (kể cả phòng tối vừa) luôn còn cạnh, đường viền.
+        """
+        # Thu nhỏ bằng trung bình vùng (64x48): triệt nhiễu cảm biến khi camera tăng độ nhạy,
+        # nếu không nhiễu hạt sẽ làm Laplacian cao giả.
+        gray = cv2.resize(image, (64, 48), interpolation=cv2.INTER_AREA).astype(np.float64)
+        if gray.ndim == 3:
+            gray = gray.mean(axis=2)
+        if float(gray.mean()) < min_brightness:
+            return True
+        h, w = gray.shape
+        cells = [gray[i * h // 4:(i + 1) * h // 4, j * w // 4:(j + 1) * w // 4].std()
+                 for i in range(4) for j in range(4)]
+        flat = sum(1 for c in cells if c < flat_cell_std) / len(cells)
+        if flat < flat_ratio:
+            return False
+        lap = (gray[1:-1, 2:] + gray[1:-1, :-2] + gray[2:, 1:-1] + gray[:-2, 1:-1] - 4 * gray[1:-1, 1:-1])
+        return float(lap.var()) < max_laplacian_var
+
     def _apply_darkness_gate(self, packet: FramePacket, sync_pair) -> None:
         """Ảnh gần như đen: hạ chất lượng cặp dữ liệu xuống DEGRADED (không cảnh báo theo độ sâu)."""
         if self.min_frame_brightness <= 0:
             return
-        brightness = float(packet.image[::8, ::8].mean())
-        dark = brightness < self.min_frame_brightness
+        dark = self.is_blind_frame(packet.image, self.min_frame_brightness)
         with self._state_lock:
             if dark and self._dark_since is None:
                 self._dark_since = time.monotonic()
@@ -674,8 +719,12 @@ class SystemCoordinator:
             if self._shutting_down:
                 return
             mode = self._selected_mode
+            if mode == "FIND" and self.object_finder is not None:
+                # Đang dẫn tới vật cần tìm: vật đó không phải "vật cản" cần la lên.
+                target = self.object_finder.snapshot().get("target")
+                assessments = [a for a in assessments if a.class_name != target]
             if self._alerts_spoken_in(mode):
-                since = self._warning_since if mode == "WARNING" else float("-inf")
+                since = self._warning_since if mode in self.WALKING_MODES else float("-inf")
                 candidates = [a for a in assessments if a.source_timestamp > since]
                 if candidates:
                     task = self.alert_aggregator.aggregate(candidates)
@@ -686,7 +735,8 @@ class SystemCoordinator:
                                  reason=self.alert_aggregator.last_reason)
         if self.safety_channel is not None:
             on_demand = mode != "WARNING"
-            allowed = not on_demand or self.on_demand_high_alert != "off"
+            # Tìm đồ: âm dẫn hướng thay cho tiếng tích (lời cảnh báo HIGH vẫn bật).
+            allowed = mode != "FIND" and (not on_demand or self.on_demand_high_alert != "off")
             self.safety_channel.update(assessments if allowed else [], time.monotonic(), on_demand)
 
     # ================= On-Demand OCR & VQA =================
@@ -903,6 +953,15 @@ class SystemCoordinator:
                 self._say_on_demand(token, self.status_text(), wait=15.0)
             elif command == "warning":
                 self.enter_warning_mode()
+            elif command == "find":
+                target = resolve_target(question)
+                if target is None:
+                    names = ", ".join(vi for vi, _ in (self.object_finder.available_targets()
+                                                       if self.object_finder else [])[:6])
+                    self._say_on_demand(token, f"Chưa tìm được loại đồ này. Có thể tìm: {names}.")
+                else:
+                    self._finish_on_demand(token)
+                    self.start_find(*target)
             elif command == "ocr":
                 with self._state_lock:
                     if self._active_on_demand_token == token and self._on_demand_active:
@@ -939,7 +998,10 @@ class SystemCoordinator:
             parts.append("Khoảng cách đã được tự hiệu chỉnh theo mặt sàn.")
         elif floor:
             parts.append("Chưa nhìn thấy mặt sàn để tự hiệu chỉnh khoảng cách.")
-        if mode != "WARNING":
+        if mode == "FIND" and self.object_finder is not None:
+            snap = self.object_finder.snapshot()
+            parts.append(f"Đang tìm {snap['target']}, " + ("đã thấy." if snap["seen"] else "chưa thấy."))
+        elif mode != "WARNING":
             if self.on_demand_high_alert == "earcon":
                 parts.append("Vật cản nguy hiểm được báo bằng tiếng bíp.")
             elif self.on_demand_high_alert == "off":
@@ -950,6 +1012,47 @@ class SystemCoordinator:
         self._feedback_ack()
         self.audio_coordinator.post_task(AudioTask(
             priority=AudioPriority.ON_DEMAND, text=self.status_text(), interruptible=True, category="info"))
+
+    # ================= Tìm đồ & nút bấm một phím =================
+
+    def start_find(self, target_vi: str, target_class: str) -> bool:
+        if self.object_finder is None:
+            self.audio_coordinator.post_task(AudioTask(
+                priority=AudioPriority.ON_DEMAND, text="Chế độ tìm đồ chưa được bật trong cấu hình.",
+                interruptible=True, category="info"))
+            return False
+        with self._state_lock:
+            if self._shutting_down:
+                return False
+            self._cancel_on_demand_locked()
+            self._select_mode_locked("FIND")
+            self.object_finder.start(target_vi, target_class)
+            if self._find_intro_done:
+                text = f"Tìm {target_vi}."
+            else:
+                text = (f"Tìm {target_vi}. Xoay camera chậm sang hai bên; tiếng bíp cao là "
+                        "vật ở ngay phía trước, càng gần bíp càng nhanh. Bấm C để thoát.")
+                self._find_intro_done = True
+            self.audio_coordinator.post_task(AudioTask(
+                priority=AudioPriority.ON_DEMAND, text=text, interruptible=True, category="find"))
+        self._feedback_ack()
+        self.event_log.write("find_start", target=target_class)
+        return True
+
+    def find_next(self) -> bool:
+        """F / bấm nút 3 lần: bắt đầu tìm, bấm tiếp để chuyển sang món kế tiếp."""
+        if self.object_finder is None:
+            return self.start_find("", "")
+        return self.start_find(*self.object_finder.next_target())
+
+    def stop_or_warning(self) -> None:
+        """Giữ nút lâu: đang có tiếng thì im; đang im mà không ở chế độ cảnh báo thì về cảnh báo."""
+        with self._state_lock:
+            mode = self._selected_mode
+        if self.audio_coordinator.is_speaking or mode == "WARNING":
+            self.stop_speech()
+        else:
+            self.enter_warning_mode()
 
     def stop_speech(self) -> None:
         """S: cancel speech/results while keeping the selected mode; tạm im tiếng bíp hiện tại."""
@@ -987,6 +1090,7 @@ class SystemCoordinator:
                                               or self.on_demand_high_alert != "off")),
                 "health_problem": self._health_problem,
                 "floor": ((depth.preprocess_transform or {}).get("floor") if depth is not None else None),
+                "find": self.object_finder.snapshot() if self.object_finder is not None else None,
                 "metrics": self.metrics.get_summary(),
                 "is_speaking": self.audio_coordinator.is_speaking
             }

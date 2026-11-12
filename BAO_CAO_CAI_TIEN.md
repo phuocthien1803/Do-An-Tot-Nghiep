@@ -163,6 +163,17 @@ chạy bằng `scripts/danh_gia_su_kien.py --so-sanh`):
    `critical_distance_m`, `drop_ratio`, `rise_ratio`, `min_frame_brightness`. Các giá trị hiện tại là
    giá trị khởi đầu hợp lý, **chưa được tối ưu**.
 
+## 6b. Bổ sung ngày 13/11/2026
+
+| Hạng mục | Nội dung | Tệp |
+|---|---|---|
+| **Sửa: che camera không báo** | Che tay lên webcam không làm ảnh tối hẳn (camera tự tăng sáng), nên ngưỡng độ sáng không bắt được. Nay xét thêm "ảnh mất chi tiết": hầu hết ô lưới 4×4 gần như phẳng và độ nét Laplacian thấp, đo trên ảnh đã thu nhỏ để khử nhiễu hạt. Đúng trên 8/8 loại ảnh thử, gồm webcam thật, phòng tối vừa, tay che sáng/tối | `system_coordinator.py` (`is_blind_frame`) |
+| **Nút bấm một phím** | Cho người khiếm thị: nút chụp ảnh Bluetooth hoặc một phím. 1 lần = hỏi, 2 lần = đọc chữ, 3 lần = tìm đồ, giữ lâu = im lặng/về cảnh báo. Nhận cả sự kiện nhả phím (pynput) và chuỗi nhấn lặp khi giữ phím (OpenCV) | `src/ui/one_button.py`, `app_runner.py` |
+| **Chế độ Tìm đồ** | Phím F, bấm nút 3 lần, hoặc nói "tìm cái cốc". Âm dẫn hướng lập thể 7 vị trí trái→phải; tiếng cao khi vật ở ngay giữa; nhanh dần khi lại gần; lời nhắc ngắn ("Thấy cốc bên trái, còn xa", "Cốc trong tầm tay", "Chưa thấy cốc, hãy xoay người chậm"). Lời cảnh báo vật cản khác vẫn bật; riêng vật đang tìm không bị coi là vật cản | `src/fusion/object_finder.py` |
+| **Kiểm thử từng phím có ảnh** | 16 kịch bản trên hệ thống thật (YOLO, độ sâu, OCR, VQA), camera kịch bản, ghi lời nói: **16/16 đạt** | `scripts/kiem_thu_phim.py`, `evaluation/results/kiem_thu_phim/` |
+
+Phát hiện khi kiểm thử: trên Windows, hỏi đáp dùng BLIP chỉ **mô tả ảnh, bỏ qua nội dung câu hỏi**. Hỏi đáp thật sự chỉ có ở bản Mac (Qwen2.5-VL). Giới hạn của Tìm đồ: chỉ tìm được lớp YOLO/COCO đã bật; chưa có "cửa", "chìa khoá", "cầu thang". Hướng mở rộng là bộ phát hiện từ vựng mở (YOLO-World) hoặc tinh chỉnh YOLO.
+
 ## 7. Giới hạn và những gì chưa làm (nói thẳng)
 
 - **Chưa chạy được trên Mac.** Các đường chạy riêng của Mac là MPS, `afplay` phát âm báo song song với

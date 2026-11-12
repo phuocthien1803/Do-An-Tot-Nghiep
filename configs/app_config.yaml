@@ -71,3 +71,16 @@ ui:
   auto_return_warning_sec: 10.0 # [Cải tiến] tự về chế độ Cảnh báo sau OCR/VQA (0 = như gốc, chờ phím C)
   headless_keyboard: true       # [Cải tiến] --no-gui vẫn điều khiển bằng bàn phím console
   global_hotkeys: false         # [Cải tiến] phím tắt toàn hệ thống (cần pip install pynput)
+  # [Cải tiến] Điều khiển MỘT NÚT cho người khiếm thị (src/ui/one_button.py). Nút chụp ảnh Bluetooth
+  # (~50-100 nghìn đồng) thường gửi "media_volume_up" hoặc "enter" -> cần global_hotkeys: true để
+  # nhận khi cửa sổ không được chọn. Thử trên bàn phím bằng phím B.
+  one_button:
+    enabled: true
+    keys: ["b", "enter", "media_volume_up", "media_play_pause"]
+    multi_click_sec: 0.45   # khoảng chờ giữa các lần bấm của cùng một cử chỉ
+    long_press_sec: 0.7
+    actions: {single: "vqa", double: "ocr", triple: "find", long: "stop_or_warning"}
+
+# [Cải tiến] Chế độ TÌM ĐỒ dẫn hướng bằng âm thanh lập thể (phím F / bấm nút 3 lần / nói "tìm cái cốc")
+find:
+  enabled: true

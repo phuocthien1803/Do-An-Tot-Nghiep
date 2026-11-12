@@ -20,6 +20,10 @@ app_config:
   ui:
     auto_return_warning_sec: 0
     headless_keyboard: false
+    one_button:
+      enabled: false
+  find:
+    enabled: false
 
 model_config:
   detection:

@@ -1,0 +1,235 @@
+{
+ "nen_tang": "windows",
+ "thiet_bi": "cpu",
+ "ket_qua": [
+  {
+   "phim": "H",
+   "chuc_nang": "Trợ giúp (đọc danh sách phím)",
+   "dat": true,
+   "ghi_chu": "Đọc to toàn bộ phím cho người không nhìn thấy màn hình.",
+   "loi_noi": [
+    "Phím cách: đọc chữ. Phím Q: hỏi phía trước có gì. Phím V: hỏi bằng giọng nói. Phím C: về chế độ cảnh báo. Phím S: dừng đọc và tạm im tiếng bíp. Phím F: tìm đồ, bấm tiếp để đổi món. Phím I: nghe trạng thái hệ thống. Phím H: nghe lại hướng dẫn. Phím Escape: thoát. Nếu dùng nút bấm cầm tay: bấm một lần để hỏi, hai lần để đọc chữ, ba lần để tìm đồ, giữ lâu để im lặng hoặc về chế độ cảnh báo."
+   ],
+   "am_bao": [
+    "ack.wav"
+   ],
+   "anh": "evaluation\\results\\kiem_thu_phim\\01_phim_h.png"
+  },
+  {
+   "phim": "I",
+   "chuc_nang": "Trạng thái hệ thống",
+   "dat": true,
+   "ghi_chu": "Đọc chế độ hiện tại, camera/độ sâu, tự hiệu chỉnh khoảng cách.",
+   "loi_noi": [
+    "Đang ở chế độ cảnh báo. Camera và cảm biến độ sâu đang hoạt động. Khoảng cách đã được tự hiệu chỉnh theo mặt sàn."
+   ],
+   "am_bao": [
+    "ack.wav"
+   ],
+   "anh": "evaluation\\results\\kiem_thu_phim\\02_phim_i.png"
+  },
+  {
+   "phim": "SPACE",
+   "chuc_nang": "Đọc chữ (OCR)",
+   "dat": true,
+   "ghi_chu": "Cảnh: biển chữ 'LỐI THOÁT HIỂM / PHÒNG HỌC 4A / CẤM HÚT THUỐC'.",
+   "loi_noi": [
+    "Đã chuyển sang chế độ đọc chữ. Vật cản nguy hiểm vẫn được báo bằng tiếng bíp.",
+    "Đang xử lý đọc chữ...",
+    "LỐI THOÁT HIỂM. PHÒNG HỌC 4A. CẤM HÚT THUỐC."
+   ],
+   "am_bao": [
+    "ack.wav",
+    "tick_center.wav",
+    "tick_center.wav",
+    "tick_center.wav",
+    "tick_center.wav",
+    "tick_center.wav",
+    "alert_center.wav",
+    "tick_center.wav",
+    "tick_center.wav",
+    "tick_center.wav",
+    "alert_center.wav",
+    "alert_center.wav",
+    "tick_center.wav"
+   ],
+   "anh": "evaluation\\results\\kiem_thu_phim\\03_phim_space.png"
+  },
+  {
+   "phim": "Q",
+   "chuc_nang": "Hỏi 'Phía trước có gì?' (VQA)",
+   "dat": true,
+   "ghi_chu": "Cảnh: đường phố có xe buýt và người. Backend: legacy_caption.",
+   "loi_noi": [
+    "Đã chuyển sang chế độ hỏi đáp. Vật cản nguy hiểm vẫn được báo bằng tiếng bíp.",
+    "Đang quan sát để trả lời...",
+    "Có một nhóm người đi vòng quanh một chiếc xe buýt. Cảm biến ghi nhận: người bên trái; người bên phải; người ở giữa, ở xa."
+   ],
+   "am_bao": [
+    "ack.wav"
+   ],
+   "anh": "evaluation\\results\\kiem_thu_phim\\04_phim_q.png"
+  },
+  {
+   "phim": "Q x2",
+   "chuc_nang": "Bấm khi hệ thống đang bận",
+   "dat": true,
+   "ghi_chu": "Lần bấm thứ hai bị từ chối nhưng có tiếng báo (bản gốc từ chối trong im lặng).",
+   "loi_noi": [
+    "Đang xử lý yêu cầu trước, vui lòng chờ."
+   ],
+   "am_bao": [
+    "reject.wav",
+    "reject.wav"
+   ],
+   "anh": "evaluation\\results\\kiem_thu_phim\\05_phim_q_x2.png"
+  },
+  {
+   "phim": "V",
+   "chuc_nang": "Hỏi bằng giọng nói",
+   "dat": true,
+   "ghi_chu": "Máy chưa cài sounddevice/faster-whisper: hệ thống phải nói rõ lý do.",
+   "loi_noi": [
+    "Chưa cài nhận dạng giọng nói (thiếu sounddevice, faster-whisper). Hãy dùng phím Q để hỏi."
+   ],
+   "am_bao": [
+    "ack.wav"
+   ],
+   "anh": "evaluation\\results\\kiem_thu_phim\\06_phim_v.png"
+  },
+  {
+   "phim": "S",
+   "chuc_nang": "Dừng đọc / tạm im tiếng bíp",
+   "dat": true,
+   "ghi_chu": "Đang đọc trợ giúp: có; sau khi bấm S im ngay: có.",
+   "loi_noi": [
+    "Phím cách: đọc chữ. Phím Q: hỏi phía trước có gì. Phím V: hỏi bằng giọng nói. Phím C: về chế độ cảnh báo. Phím S: dừng đọc và tạm im tiếng bíp. Phím F: tìm đồ, bấm tiếp để đổi món. Phím I: nghe trạng thái hệ thống. Phím H: nghe lại hướng dẫn. Phím Escape: thoát. Nếu dùng nút bấm cầm tay: bấm một lần để hỏi, hai lần để đọc chữ, ba lần để tìm đồ, giữ lâu để im lặng hoặc về chế độ cảnh báo."
+   ],
+   "am_bao": [
+    "ack.wav"
+   ],
+   "anh": "evaluation\\results\\kiem_thu_phim\\07_phim_s.png"
+  },
+  {
+   "phim": "C",
+   "chuc_nang": "Về chế độ cảnh báo",
+   "dat": true,
+   "ghi_chu": "Bật lại lời cảnh báo vật cản sau khi dùng đọc chữ/hỏi đáp.",
+   "loi_noi": [
+    "Đã chuyển sang chế độ cảnh báo."
+   ],
+   "am_bao": [],
+   "anh": "evaluation\\results\\kiem_thu_phim\\08_phim_c.png"
+  },
+  {
+   "phim": "(che camera)",
+   "chuc_nang": "Phát hiện ống kính bị che",
+   "dat": true,
+   "ghi_chu": "Cảnh: tay che ống kính (ảnh nhoè, không tối hẳn vì camera tự tăng sáng).",
+   "loi_noi": [
+    "Ảnh camera quá tối hoặc ống kính bị che. Cảnh báo vật cản đang tạm ngừng, hãy dừng lại và dùng gậy dò đường."
+   ],
+   "am_bao": [],
+   "anh": "evaluation\\results\\kiem_thu_phim\\09_phim__che_camera_.png"
+  },
+  {
+   "phim": "(tự động)",
+   "chuc_nang": "Cảnh báo người tiến lại gần",
+   "dat": true,
+   "ghi_chu": "Cảnh: người to dần trong 4 s. Kỳ vọng câu ngắn + âm báo theo hướng.",
+   "loi_noi": [
+    "Người đang lại gần, bên phải"
+   ],
+   "am_bao": [],
+   "anh": "evaluation\\results\\kiem_thu_phim\\10_phim__tự_động_.png"
+  },
+  {
+   "phim": "NÚT x1",
+   "chuc_nang": "Nút cầm tay: bấm 1 lần = hỏi",
+   "dat": true,
+   "ghi_chu": "Một nút duy nhất, không cần nhìn bàn phím. Bấm 1 lần -> 'Phía trước có gì?'.",
+   "loi_noi": [
+    "Đã chuyển sang chế độ hỏi đáp. Vật cản nguy hiểm vẫn được báo bằng tiếng bíp.",
+    "Đang quan sát để trả lời...",
+    "Có một nhóm người đi vòng quanh một chiếc xe buýt. Cảm biến ghi nhận: người ở giữa, ở xa; người bên trái; người bên phải."
+   ],
+   "am_bao": [
+    "ack.wav"
+   ],
+   "anh": "evaluation\\results\\kiem_thu_phim\\11_phim_nút_x1.png"
+  },
+  {
+   "phim": "NÚT x2",
+   "chuc_nang": "Nút cầm tay: bấm 2 lần = đọc chữ",
+   "dat": true,
+   "ghi_chu": "Bấm nhanh 2 lần -> đọc biển chữ.",
+   "loi_noi": [
+    "Đã chuyển sang chế độ đọc chữ. Vật cản nguy hiểm vẫn được báo bằng tiếng bíp.",
+    "Đang xử lý đọc chữ...",
+    "LỐI THOÁT HIỂM. PHÒNG HỌC 4A. CẤM HÚT THUỐC."
+   ],
+   "am_bao": [
+    "tick_center.wav",
+    "ack.wav",
+    "tick_center.wav",
+    "tick_center.wav",
+    "alert_center.wav",
+    "tick_center.wav",
+    "tick_center.wav",
+    "tick_center.wav",
+    "tick_center.wav",
+    "tick_center.wav"
+   ],
+   "anh": "evaluation\\results\\kiem_thu_phim\\12_phim_nút_x2.png"
+  },
+  {
+   "phim": "NÚT giữ",
+   "chuc_nang": "Nút cầm tay: giữ lâu = về cảnh báo",
+   "dat": true,
+   "ghi_chu": "Giữ ≥ 0,7 s khi đang im -> về chế độ cảnh báo.",
+   "loi_noi": [
+    "Đã chuyển sang chế độ cảnh báo."
+   ],
+   "am_bao": [],
+   "anh": "evaluation\\results\\kiem_thu_phim\\13_phim_nút_giữ.png"
+  },
+  {
+   "phim": "NÚT x3 / F",
+   "chuc_nang": "Tìm đồ: món đầu tiên trong danh sách",
+   "dat": true,
+   "ghi_chu": "Bấm 3 lần (hoặc F) bắt đầu tìm; bấm tiếp để đổi món. Cảnh không có cốc -> nhắc xoay người.",
+   "loi_noi": [
+    "Tìm cốc. Xoay camera chậm sang hai bên; tiếng bíp cao là vật ở ngay phía trước, càng gần bíp càng nhanh. Bấm C để thoát.",
+    "Chưa thấy cốc, hãy xoay người chậm."
+   ],
+   "am_bao": [
+    "ack.wav"
+   ],
+   "anh": "evaluation\\results\\kiem_thu_phim\\14_phim_nút_x3___f.png"
+  },
+  {
+   "phim": "TÌM NGƯỜI",
+   "chuc_nang": "Tìm đồ: dẫn hướng bằng âm thanh lập thể",
+   "dat": true,
+   "ghi_chu": "Người lệch trái -> bíp trầm lệch trái (guide_0/1_lo); xoay vào giữa -> bíp cao (guide_3_hi).",
+   "loi_noi": [
+    "Tìm người.",
+    "Thấy người bên trái, còn xa."
+   ],
+   "am_bao": [
+    "ack.wav",
+    "guide_1_lo.wav",
+    "guide_3_hi.wav",
+    "guide_3_hi.wav",
+    "guide_3_hi.wav"
+   ],
+   "anh": "evaluation\\results\\kiem_thu_phim\\15_phim_tìm_người.png"
+  },
+  {
+   "phim": "ESC",
+   "chuc_nang": "Thoát",
+   "dat": true,
+   "ghi_chu": "dispatch trả về False"
+  }
+ ]
+}

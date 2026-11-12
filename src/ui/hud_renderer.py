@@ -192,6 +192,7 @@ class HUDRenderer:
         det_res = snapshot.get("detection")
         assessments = snapshot.get("assessments") or []
         self._draw_assessments(canvas, det_res, assessments, packet.original_size, scale, pad_x, pad_y)
+        self._draw_find_target(canvas, snapshot.get("find"), packet.original_size, scale, pad_x, pad_y)
 
         # 4. Banner cảnh báo ưu tiên khẩn cấp (Priority Alert Banner)
         legacy_mode = snapshot.get("mode", "OBSERVATION")
@@ -251,7 +252,12 @@ class HUDRenderer:
         mode_str = snapshot.get("mode", "OBSERVATION")
         selected = snapshot.get("selected_mode", mode_str if mode_str in ("OCR", "VQA") else "WARNING")
         enabled = snapshot.get("safety_alerts_enabled", selected == "WARNING")
-        if selected in ("OCR", "VQA"):
+        find = snapshot.get("find") or {}
+        if selected == "FIND":
+            target = self._clean_ascii(find.get("target", "")).upper()
+            pill_text = f"TIM: {target} | {'DA THAY' if find.get('seen') else 'CHUA THAY'}"
+            pill_color = (255, 80, 220)
+        elif selected in ("OCR", "VQA"):
             active = snapshot.get("on_demand_active", True)
             status = "XU LY" if active else "SAN SANG"
             if width < 600:
@@ -440,6 +446,19 @@ class HUDRenderer:
             self._draw_translucent_panel(canvas, tag_x1, tag_y1, tag_x2, tag_y2, bg_color=COLOR_PANEL_BG, border_color=color, alpha=0.90, border_thickness=1)
             cv2.putText(canvas, label_text, (tag_x1 + 5, tag_y1 + th + 4), cv2.FONT_HERSHEY_SIMPLEX, font_scale, COLOR_TEXT_MAIN, 1, cv2.LINE_AA)
 
+    def _draw_find_target(self, canvas, find, original_size, scale, pad_x, pad_y) -> None:
+        """Khung tím quanh vật đang được dẫn tới trong chế độ Tìm đồ."""
+        if not find or not find.get("active") or not find.get("seen") or not find.get("box"):
+            return
+        x1, y1, x2, y2 = find["box"]
+        p1 = (pad_x + int(x1 * scale), pad_y + int(y1 * scale))
+        p2 = (pad_x + int(x2 * scale), pad_y + int(y2 * scale))
+        color = (255, 80, 220)
+        cv2.rectangle(canvas, p1, p2, color, 3, cv2.LINE_AA)
+        label = f"MUC TIEU: {self._clean_ascii(find.get('target', '')).upper()}"
+        cv2.putText(canvas, label, (p1[0] + 4, max(60, p2[1] - 8)), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
+                    color, 2, cv2.LINE_AA)
+
     def _draw_alert_banner(self, canvas: np.ndarray, assessments: List[RiskAssessment], width: int) -> None:
         """D. Priority Alert Banner: Chỉ hiển thị cho HIGH, không che depth card."""
         urgent = [a for a in assessments if isinstance(a, RiskAssessment) and a.risk_level == RiskLevel.HIGH]
@@ -544,6 +563,7 @@ class HUDRenderer:
             ("SPACE", "Doc chu"),
             ("C", "Canh bao"),
             ("S", "Dung"),
+            ("F", "Tim do"),
             ("H", "Tro giup"),
             ("ESC", "Thoat")
         ]

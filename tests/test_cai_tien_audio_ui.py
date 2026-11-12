@@ -272,11 +272,25 @@ class TestCoordinatorImprovements(unittest.TestCase):
         self.camera.get_latest_frame.return_value = dark
         system._dark_since -= 3.0
         self.assertEqual(system._diagnose(time.monotonic()), "dark")
-        bright = FramePacket(2, "c", np.full((48, 64, 3), 120, np.uint8), (64, 48), time.monotonic())
+        scene = np.zeros((48, 64, 3), np.uint8)
+        scene[:, ::8] = 220  # cảnh có chi tiết, đủ sáng
+        bright = FramePacket(2, "c", scene, (64, 48), time.monotonic())
         pair = SynchronizedPair(MagicMock(), MagicMock(), DataQuality.VALID, 0.0, time.monotonic())
         system._apply_darkness_gate(bright, pair)
         self.assertEqual(pair.data_quality, DataQuality.VALID)
         self.assertIsNone(system._dark_since)
+
+    def test_hand_covering_lens_is_blind_even_when_not_dark(self):
+        self.build()
+        rng = np.random.default_rng(0)
+        covered = np.clip(np.full((480, 640, 3), (70, 90, 160), float) + rng.normal(0, 6, (480, 640, 3)),
+                          0, 255).astype(np.uint8)  # tay che: camera tăng sáng, ảnh nhoè có nhiễu hạt
+        self.assertTrue(SystemCoordinator.is_blind_frame(covered))
+        scene = np.zeros((480, 640, 3), np.uint8)
+        for x in range(0, 640, 40):  # cảnh có cạnh/đường viền
+            scene[:, x:x + 20] = 200
+        self.assertFalse(SystemCoordinator.is_blind_frame(scene))
+        self.assertFalse(SystemCoordinator.is_blind_frame((scene * 0.3).astype(np.uint8)))  # tối vừa
 
     def test_help_and_status_are_spoken(self):
         system = self.build()
