@@ -1,0 +1,7 @@
+# Giữ kiểu xuống dòng đúng cho từng nền tảng khi chép/clone giữa Windows và Mac
+*.sh   text eol=lf
+*.py   text eol=lf
+*.yaml text eol=lf
+*.md   text eol=lf
+*.bat  text eol=crlf
+*.vbs  text eol=crlf
